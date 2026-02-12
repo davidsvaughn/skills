@@ -179,5 +179,3 @@ When disk is full:
 3. `docker builder prune -a`
 4. `docker system df`
 5. Verify `/var/lib/docker/overlay2` size
-
-```
