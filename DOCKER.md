@@ -180,13 +180,4 @@ When disk is full:
 4. `docker system df`
 5. Verify `/var/lib/docker/overlay2` size
 
----
-
-# 📌 Core Lesson
-
-Docker never cleans up unused layers automatically.
-If you build large images frequently, you must prune periodically.
-
----
-
 ```
