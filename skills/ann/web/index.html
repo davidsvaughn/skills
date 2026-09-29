@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ann</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-left">
+    <span class="app">ann</span>
+    <span id="title" class="title"></span>
+  </div>
+  <div class="bar-right">
+    <span id="count" class="count"></span>
+    <span id="status" class="status" data-state="connecting">connecting</span>
+    <button id="general" class="btn" type="button" title="Comment on the whole document">Comment on whole doc</button>
+    <button id="undo" class="btn" type="button" title="Undo the last change (Ctrl+Z)">Undo</button>
+  </div>
+</header>
+<div class="layout" id="layout">
+  <article class="doc" id="doc"></article>
+  <aside class="margin" id="margin">
+    <div id="cards"></div>
+    <div id="composer" class="card composer" hidden>
+      <div class="card-head"><span id="composer-title" class="kind"></span><button class="link-btn" type="button" data-act="cancel">Cancel</button></div>
+      <blockquote id="composer-quote" class="quote"></blockquote>
+      <div id="composer-note" class="note" hidden></div>
+      <textarea id="composer-text" rows="3" placeholder="Write a comment"></textarea>
+      <div id="composer-error" class="error" hidden></div>
+      <div class="composer-foot">
+        <span class="hint">Enter saves · Shift+Enter newline · Esc cancels</span>
+        <button class="btn primary" type="button" data-act="save">Save</button>
+      </div>
+    </div>
+  </aside>
+</div>
+<button id="fab" class="fab" type="button" hidden title="Comment on the selection (Ctrl+Shift+M)">Comment</button>
+<div id="toast" class="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
