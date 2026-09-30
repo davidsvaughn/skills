@@ -24,24 +24,39 @@ In pi and Oh My Pi, invoke them as `/skill:<name>`.
 
 ## Install
 
-With the [skills CLI](https://github.com/vercel-labs/skills), one skill at a time:
+With the [skills CLI](https://github.com/vercel-labs/skills), which copies the skills you pick into the agents you pick:
 
 ```bash
-npx skills add davidsvaughn/skills --skill ann --global --agent claude-code
+npx skills@latest add davidsvaughn/skills
 ```
 
-Or clone the repo and symlink the skills you want, which keeps them updatable with `git pull`:
+One skill, without prompts (the form an agent should use):
 
 ```bash
-git clone https://github.com/davidsvaughn/skills.git ~/code/skills
-ln -s ~/code/skills/skills/ann ~/.claude/skills/ann      # Claude Code
-ln -s ~/code/skills/skills/ann ~/.agents/skills/ann      # Oh My Pi, pi, Codex, OpenCode
+npx -y skills@latest add davidsvaughn/skills --skill handoff --agent claude-code --global -y
 ```
 
-`~/.agents/skills` is the shared location those agents read; OpenCode also reads `~/.claude/skills`.
+`--list` shows what is available without installing; drop `--global` to install into the current project only; `--agent` also takes `codex`, `opencode` and others.
 
-For `ann`, run `npm ci` in the installed skill directory once.
+Or clone the repo and symlink, which keeps the skills updatable with `git pull`:
+
+```bash
+git clone https://github.com/davidsvaughn/skills.git
+cd skills && scripts/link-skills.sh
+```
+
+The script links every skill into `~/.claude/skills` (Claude Code) and the portable ones into `~/.agents/skills` (Oh My Pi, pi, Codex, OpenCode); `--dry-run` shows what it would do.
+
+After installing `ann`, run `npm ci` once in its skill directory.
 `ann` and `draft` write to `.notes/drafts/`; add `.notes/` to your global gitignore so those files never get committed.
+
+## Contributing
+
+[AGENTS.md](AGENTS.md) has the repo's rules, for people and for coding agents; `scripts/check.sh` verifies the ones that can be checked mechanically.
+
+## License
+
+[MIT](LICENSE)
 
 ## See also
 
