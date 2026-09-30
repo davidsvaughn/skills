@@ -1,48 +1,61 @@
 ---
 name: handoff
-description: Write or refresh the project's HANDOFF.md, the current-state entry point that lets the next agent or session pick up the work without the chat history, and log durable checkpoints in a history file beside it. Use when the user asks to prepare, update, refresh or run a handoff, says /handoff, wants a "where are we" summary written down for the next session, or is wrapping up a long working session.
-argument-hint: "[path to the handoff file | note on what to emphasize]"
+description: Write the next numbered handoff file (HANDOFF-001.md, HANDOFF-002.md, ...), a complete current-state snapshot that lets the next agent or session pick up the work without the chat history, while every earlier handoff stays untouched so the chronology is easy to recover. Use when the user asks to prepare, update, refresh or run a handoff, says /handoff, wants a "where are we" summary written down for the next session, or is wrapping up a long working session.
+argument-hint: "[directory for the handoffs | note on what to emphasize]"
 ---
 
-# /handoff - keep the current-state doc current
+# /handoff - a numbered current-state snapshot
+
+Session id: ${CLAUDE_SESSION_ID}
+Date: !`date '+%Y-%m-%d %H:%M'`
 
 Arguments: $ARGUMENTS
 
 A handoff answers one question for a fresh agent: where are we right now, and what is next?
-It is not a history.
-History goes in a log file beside it, so the handoff stays short enough to read first.
+Each handoff is a new, complete file; older ones are never edited or overwritten.
+The series is the history: the highest number is the current state, and a diff between two consecutive files shows what changed between them.
 
-## Find the files
+## Find the series
 
-1. If the arguments name a file, use it.
-2. Otherwise look for an existing one: `git ls-files | grep -i -E '(^|/)handoff\.md$'`.
-   One match: use it.
-   Several: list them and ask which one.
-3. None: propose `docs/HANDOFF.md` (or the repo root if the repo has no `docs/`), and create it from the template below once the user agrees.
+1. If the arguments name a directory, the series lives there.
+2. Otherwise look for one: `git ls-files | grep -i -E '(^|/)handoff(-[0-9]+)?\.md$'`, and also check `docs/handoffs/`.
+   Numbered files in one directory: that is the series.
+   Numbered files in several directories: list them and ask which one.
+   Only an unnumbered `HANDOFF.md`: treat it as the previous snapshot, leave it as it is, and start the series in the same directory.
+3. Nothing found: propose `docs/handoffs/` (or `handoffs/` at the root if the repo has no `docs/`) and start there once the user agrees.
 
-The history log is `IMPLEMENTATION-LOG.md` in the same directory, unless the handoff already links to a different one.
-Create it on the first entry.
+## Choose the file to write
 
-## Update the handoff
+- The next number is the highest existing number plus one, zero-padded to three digits: `HANDOFF-001.md`, `HANDOFF-002.md`, and so on.
+  With no existing files, start at `HANDOFF-001.md`.
+- Exception: if the latest file's header carries this session's id, this session wrote it, so update that file in place instead of starting another.
+- Never modify any other handoff.
 
-1. Read the handoff as it stands.
+## Write it
+
+1. Read the previous snapshot (the latest numbered file, or the legacy `HANDOFF.md`), if there is one.
 2. Check the repository state: `git status --short --branch` and `git log --oneline -10`.
 3. Gather what changed this session: code and doc changes, test and build results, commits pushed, blockers hit, and priorities the user stated.
-4. Update only the sections that changed.
-   Rewrite stale lines rather than appending below them; the file describes the present.
-5. If the session reached a durable checkpoint (a pushed commit, a finished milestone, a decision), append a short dated entry to the history log, unless one already covers it.
-6. If you added or changed links, check that they resolve.
-7. Commit the handoff with the work it describes; push if the project's workflow pushes checkpoints.
+4. Start the new file from the previous snapshot and rewrite every section that is no longer true.
+   The file describes the present; do not append "update:" lines under stale ones.
+   Put what changed since the previous handoff in "Since the last handoff".
+5. If you added or changed links, check that they resolve.
+6. Commit the new file with the work it describes; push if the project's workflow pushes checkpoints.
 
-## Template for a new handoff
+## Template
 
 ```markdown
-# Handoff
+---
+handoff: 003
+date: <date>
+session: <session id>
+previous: HANDOFF-002.md
+---
 
-Current-state entry point for the next agent or session.
-History: [IMPLEMENTATION-LOG.md](IMPLEMENTATION-LOG.md).
+# Handoff 003
 
 ## Current status
+## Since the last handoff
 ## Latest session notes
 ## Last verified commands
 ## Next recommended actions
