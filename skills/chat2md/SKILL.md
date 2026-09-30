@@ -6,11 +6,11 @@ argument-hint: "<share URL> [output path]"
 
 # chat2md - a shared ChatGPT or Claude thread as a markdown file
 
-Run the bundled script with the link.
+Run the bundled script with the link (the path is relative to this skill's directory, which is stated where the skill was loaded).
 It works out which site the link is from, gets the conversation out, and writes the transcript:
 
 ```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/chat2md.py "<share URL>" --out <path.md>
+python3 scripts/chat2md.py "<share URL>" --out <path.md>
 ```
 
 It is stdlib-only Python, so there is nothing to install.
@@ -26,7 +26,7 @@ The evidence for everything below, with dates and the dead ends, is in `NOTES.md
   The share page fetches fine, but the conversation sits in an encoded React Router payload inside it, which the script decodes.
 - **Claude** (`source_claude.py`): the share page is an empty app shell, so a saved claude.ai page is useless.
   The conversation comes as JSON from claude.ai's snapshot API, which is behind a Cloudflare bot check.
-  The script tries a plain request first, and when Cloudflare refuses it, opens a short-lived visible `playwright-cli` browser (session `chat2md-<first 8 characters of the Claude Code session id>`, override with `--browser-session`), keeps the snapshot the page requests, and closes the window; that takes a few seconds.
+  The script tries a plain request first, and when Cloudflare refuses it, opens a short-lived visible `playwright-cli` browser (session `chat2md-<first 8 characters of the Claude Code session id, or of the process id elsewhere>`, override with `--browser-session`), keeps the snapshot the page requests, and closes the window; that takes a few seconds.
   The plain request sends an ordinary browser User-Agent on a single fetch of a public page, and that is as far as it goes: a headless browser does not pass the check, and the check itself is never evaded (no faked browser fingerprints, no automated challenge solving); when the plain request is refused, the visible window is the route.
 
 Reading the rendered page instead (browser, copy-paste) loses code blocks, tables and links on both sites, and quietly drops anything below the fold.

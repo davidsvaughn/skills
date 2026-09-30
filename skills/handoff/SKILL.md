@@ -8,8 +8,9 @@ argument-hint: "[directory for the handoffs | note on what to emphasize]"
 
 Session id: ${CLAUDE_SESSION_ID}
 Date: !`date '+%Y-%m-%d %H:%M'`
+(If the lines above show a variable name or a command instead of values, this harness does not fill them in: run `date '+%Y-%m-%d %H:%M'` yourself and leave the session id empty.)
 
-Arguments: $ARGUMENTS
+Arguments: the text the user typed after the skill name, which the harness appends after these instructions (Claude Code as `ARGUMENTS: ...`, pi/OMP as `User: ...`); none appended means no arguments.
 
 A handoff answers one question for a fresh agent: where are we right now, and what is next?
 Each handoff is a new, complete file; older ones are never edited or overwritten.
@@ -28,7 +29,8 @@ The series is the history: the highest number is the current state, and a diff b
 
 - The next number is the highest existing number plus one, zero-padded to three digits: `HANDOFF-001.md`, `HANDOFF-002.md`, and so on.
   With no existing files, start at `HANDOFF-001.md`.
-- Exception: if the latest file's header carries this session's id, this session wrote it, so update that file in place instead of starting another.
+- Exception: if you know this session's id and the latest file's header carries the same one, this session wrote it, so update that file in place instead of starting another.
+  An empty or unknown session id never matches; write a new file.
 - Never modify any other handoff.
 
 ## Write it

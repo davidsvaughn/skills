@@ -10,8 +10,12 @@ disable-model-invocation: true
 Timestamp for the filename: !`date +%Y%m%d-%H%M%S`
 Date for the header: !`date '+%Y-%m-%d %H:%M'`
 Session id: ${CLAUDE_SESSION_ID}
+(If the lines above show a command or a variable name instead of values, this harness does not fill
+them in: run `date +%Y%m%d-%H%M%S` and `date '+%Y-%m-%d %H:%M'` yourself, and leave the session id empty.)
 
-Arguments: $ARGUMENTS
+Arguments: the text the user typed after the skill name, which the harness appends after these
+instructions (Claude Code as `ARGUMENTS: ...`, pi/OMP as `User: ...`); none appended means no arguments.
+Paths in this file are relative to this skill's directory, which is stated where the skill was loaded.
 
 ## What to do
 
@@ -54,7 +58,6 @@ Reply in chat with one line and nothing else:
 
 The user will annotate the file with CriticMarkup — `{==text==}{>>you|date: comment<<}`,
 `{>>you|date: comment<<}`, `{++insert++}`, `{--delete--}`, `{~~old~>new~~}` — and come back with
-"address the annotations in <path>". Handle that as `${CLAUDE_SKILL_DIR}/references/criticmarkup.md`
-says (read it then if it is not already in context): inventory every annotation before acting, work
+"address the annotations in <path>". Handle that as `references/criticmarkup.md` says (read it then if it is not already in context): inventory every annotation before acting, work
 out the scope of each, act on its intent, respond in chat rather than in the file, and never edit,
 move or remove the user's annotations.

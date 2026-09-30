@@ -9,8 +9,12 @@ argument-hint: "[path/to/doc.md | question]"
 Timestamp for a new file: !`date +%Y%m%d-%H%M%S`
 Date for the header: !`date '+%Y-%m-%d %H:%M'`
 Session id: ${CLAUDE_SESSION_ID}
+(If the lines above show a command or a variable name instead of values, this harness does not fill
+them in: run `date +%Y%m%d-%H%M%S` and `date '+%Y-%m-%d %H:%M'` yourself, and leave the session id empty.)
 
-Arguments: $ARGUMENTS
+Arguments: the text the user typed after the skill name, which the harness appends after these
+instructions (Claude Code as `ARGUMENTS: ...`, pi/OMP as `User: ...`); none appended means no arguments.
+Paths in this file are relative to this skill's directory, which is stated where the skill was loaded.
 
 ## Decide the mode
 
@@ -44,18 +48,18 @@ prompt: <the user message this body answers, trimmed to one line - for a bare /a
 ## Open the file
 
 ```
-node ${CLAUDE_SKILL_DIR}/scripts/ann.mjs open <file>
+node scripts/ann.mjs open <file>
 ```
 
 It starts a local server for that file (or reuses a running one), opens the default browser on a
 tokenised `127.0.0.1` URL and prints `url:`, `file:` and `log:`. Reply in chat with one line: the URL
 and the file path. Then stop. Do not wait, poll, or watch the file: comments are saved into the `.md`
 file as they are made, and the user comes back in the terminal with "address the annotations in
-<path>". Handle that as `${CLAUDE_SKILL_DIR}/references/criticmarkup.md` says (inventory every
+<path>". Handle that as `references/criticmarkup.md` says (inventory every
 annotation, work out each one's scope, act on its intent, reply in chat, never edit or remove the
 annotations); read it then if it is not already in context. The page reloads itself whenever the file
 changes, including when you edit it.
 
-If the command fails with "Dependencies are missing", run `npm ci` in `${CLAUDE_SKILL_DIR}` once (Node 20 or later).
+If the command fails with "Dependencies are missing", run `npm ci` in the skill directory once (Node 20 or later).
 `ann.mjs list` shows running servers, `ann.mjs stop <file>` stops one; they exit by themselves 30
 minutes after the last tab closes. Details, internals and verification: `README.md` next to this file.
