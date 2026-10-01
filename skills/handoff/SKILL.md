@@ -41,8 +41,14 @@ The series is the history: the highest number is the current state, and a diff b
 4. Start the new file from the previous snapshot and rewrite every section that is no longer true.
    The file describes the present; do not append "update:" lines under stale ones.
    Put what changed since the previous handoff in "Since the last handoff".
-5. If you added or changed links, check that they resolve.
-6. Commit the new file with the work it describes; push if the project's workflow pushes checkpoints.
+5. Make the file self-sufficient as an entry point, not as a copy: a fresh agent given only this file must reach everything else by links.
+   - Open with a "Read in this order" list of Markdown links (relative paths): the project's authoritative state document first, then the index/pointer document, then any instrument or recipe the next step depends on, then background. Every document, dossier, skill or script named anywhere in the file is a link, not a bare path.
+   - If the project keeps its queue in a state document (a `docs/…/NN-state-*.md`, a ledger, a TODO with a stated precedence rule), do not restate it as an independent list: link the queue section, say it is authoritative, and keep "Next recommended actions" to a convenience restatement that defers to it.
+   - Anything the session's comparisons or results depend on that exists only in chat or in tool calls (reviewer instructions, judge prompts, grading rubrics, exact run recipes and environment, group splits) is written to a file in the repo first and linked; a number that cannot be reproduced on the same instrument is not handed off.
+   - List every process the next agent must restart because it will not survive the session (proxies, tunnels, dev servers, watchers started from this session), each with its exact start command.
+   - Name what is waiting on the user (decisions, approvals, deletions) separately from what the next agent can do unaided.
+6. Check that every link resolves (for example `for l in $(grep -o "]([^)]*)" FILE | tr -d '])(' | sort -u); do [ -e "$l" ] || echo "BROKEN $l"; done`, run from the handoff's directory).
+7. Commit the new file with the work it describes; push if the project's workflow pushes checkpoints.
 
 ## Template
 
@@ -56,13 +62,18 @@ previous: HANDOFF-002.md
 
 # Handoff 003
 
+## Read in this order
+<numbered Markdown links: authoritative state document (queue section flagged) → pointer/index → instruments and recipes the next step needs → background>
 ## Current status
 ## Since the last handoff
 ## Latest session notes
 ## Last verified commands
+## Processes to restart
 ## Next recommended actions
+<defers to the linked queue when the project keeps one>
 ## Known constraints
 ## Known issues / open questions
+## Waiting on the user
 ```
 
 ## Style
@@ -71,3 +82,4 @@ previous: HANDOFF-002.md
 - Exact paths, branch names, commit hashes, IDs and command results where they help the next agent act.
 - "Last verified commands" lists commands that were actually run this session, with their outcome, not commands that should work.
 - If the next step is obvious, state it directly.
+- Links, not paths: a reader must be able to click through to every document the file relies on; bare `docs/...` paths in backticks are only for files that do not exist yet.
