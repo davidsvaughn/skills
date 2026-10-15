@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from chat2md_common import UA, log
@@ -208,6 +209,43 @@ def _ref_links(ref: dict) -> list[tuple[str, str]]:
     return out
 
 
+def genui_refs(text: str, meta: dict, counters: dict) -> list[dict]:
+    """Citation references for the inline components of a "genui" message (seen 2026-10-15).
+
+    Such a message writes its citations as tags in the text, `<Cite ref="..."/>` or
+    `<Cite refs={[...]}/>`, and `<MemoryCite />` for an appeal to ChatGPT's memory; their sources are
+    not in `content_references` but in `metadata.genui_components`, one entry per tag with its span
+    (`start_index`, `end_index`) and its links in `safe_urls`. The links include thumbnails from
+    images.openai.com, which are not sources and are left out; titles come from the message's
+    `search_result_groups`. The references returned here are spliced by `apply_citations` together
+    with the message's `content_references`, so the offsets of both stay valid.
+    """
+    titles = {}
+    for group in meta.get("search_result_groups") or []:
+        for entry in (group or {}).get("entries") or []:
+            if isinstance(entry, dict) and entry.get("url") and entry.get("title"):
+                titles.setdefault(entry["url"], entry["title"])
+    refs = []
+    for comp in meta.get("genui_components") or []:
+        start, end = comp.get("start_index"), comp.get("end_index")
+        if not (isinstance(start, int) and isinstance(end, int)):
+            continue
+        kind = comp.get("type")
+        if kind == "cite":
+            items = [{"url": u["url"], "title": titles.get(u["url"], urllib.parse.urlsplit(u["url"]).netloc)}
+                     for u in comp.get("safe_urls") or []
+                     if isinstance(u, dict) and u.get("url")
+                     and urllib.parse.urlsplit(u["url"]).netloc != "images.openai.com"]
+        elif kind != "memory_cite":
+            counters.setdefault("genui_unknown", []).append(kind)
+            continue
+        else:
+            items = []
+        refs.append({"type": f"genui_{kind}", "matched_text": text[start:end],
+                     "start_idx": start, "end_idx": end, "items": items})
+    return refs
+
+
 def apply_citations(text: str, refs: list, counters: dict) -> str:
     """Replace citation markers with the links they stand for, so no source is lost.
 
@@ -248,7 +286,13 @@ def apply_citations(text: str, refs: list, counters: dict) -> str:
             counters["citations_unplaced"] = counters.get("citations_unplaced", 0) + 1
 
     for start, end, ref, links in sorted(spans, key=lambda s: -s[0]):
-        if not links:
+        if ref.get("type") == "genui_memory_cite":
+            rendered = "*[memory citation]*"
+        elif ref.get("type") == "genui_cite" and links:
+            # The tag follows its sentence after a space, so the link list needs no space of its own.
+            gap = "" if start and text[start - 1].isspace() else " "
+            rendered = gap + "(" + ", ".join(f"[{lab}]({url})" for lab, url in links) + ")"
+        elif not links:
             # A link-less reference is removed only when it is a marker or a UI payload: `type`
             # `hidden` (a `genui` blob wrapped in the U+E2xx glyphs), or a span that is whitespace or
             # starts with a private-use glyph. ChatGPT's suggested follow-up prompts (`type`
@@ -305,7 +349,8 @@ def build_blocks(conv: dict, counters: dict) -> list[dict]:
         ctype, recipient = content.get("content_type"), (m.get("recipient") or "")
         parts = content.get("parts") or []
         text = "\n".join(part_text(p, counters) for p in parts)
-        text = clean(apply_citations(text, meta.get("content_references") or [], counters), counters)
+        refs = (meta.get("content_references") or []) + genui_refs(text, meta, counters)
+        text = clean(apply_citations(text, refs, counters), counters)
 
         if role in ("user", "assistant") and ctype in ("text", "multimodal_text") and \
                 recipient in ("", "all") and text:
@@ -359,6 +404,9 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
         notes.append(f"{counters['citations_to_tail']} whitespace-marker citation(s) moved to the Sources line")
     if counters.get("citations_unplaced"):
         notes.append(f"{counters['citations_unplaced']} citation(s) could not be placed and are NOT in the file")
+    if counters.get("genui_unknown"):
+        kinds = ", ".join(sorted(set(map(str, counters["genui_unknown"]))))
+        notes.append(f"{len(counters['genui_unknown'])} genui component(s) of unknown type left as written ({kinds})")
     if counters.get("non_text_parts"):
         kinds = ", ".join(sorted(set(counters["non_text_parts"])))
         notes.append(f"{len(counters['non_text_parts'])} non-text part(s) kept as placeholders ({kinds})")

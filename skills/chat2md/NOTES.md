@@ -39,6 +39,11 @@ Kinds seen on 2026-09-23, with what the converter does:
 - `assistant`, `text`, recipient `api_tool.call_tool`, and the `tool` reply after it: both say only "The output of this plugin was redacted."
   The converter skips them without a note (see `TODO.md`).
 - Tool results are not published: container and plugin output comes through redacted (by 2026-09-18, and seen again 2026-09-23).
+- A long answer can be published as one merged message plus its fragments (seen 2026-10-15, model `gpt-6-thinking`).
+  The merged message has `is_merged_message` and `source_message_ids`; each fragment has `is_message_fragment`, `merged_message_id` and `is_visually_hidden_from_conversation`, so the converter skips the fragments and writes the merged message, which holds the whole text.
+  The fragments carried `sources_footnote` references with no sources in them, and the merged message carried none, so nothing was lost by skipping them.
+- The same answer was written in ChatGPT's "genui" markup: layout tags such as `<text color="secondary" size="xs">`, `<box gap={3}>` and `<row align=start gap={3}>` inline in the markdown (seen 2026-10-15).
+  The converter keeps them verbatim; a markdown viewer that drops unknown tags still shows the text inside them.
 
 ### Citations
 
@@ -57,6 +62,10 @@ Kinds seen on 2026-09-23, with what the converter does:
   The `prompt_text` (the fuller suggested prompt) is not part of the message and is not written out.
 - The other link-less type seen is `hidden` (share `6ab4295a-...`, 2026-09-21, two occurrences): a UI payload such as `genui{"suggest_automation":{"label":"..."}}` embedded in the message text, wrapped in the same private-use glyphs as citations.
   It is not the model's prose and is removed; a first version of the 2026-09-24 guard kept it, which the regression check against the stored transcript caught.
+- A genui message writes its citations as inline tags, `<Cite ref="turn<n>view<k>"/>` or `<Cite refs={["...","..."]}/>`, and `<MemoryCite />` where it leans on ChatGPT's memory (seen 2026-10-15, model `gpt-6-thinking`, 9 `cite` and 1 `memory_cite`).
+  Their sources are not in `content_references` (which held only `followup_a` entries there) but in `metadata.genui_components`: one entry per tag with `type`, `start_index`, `end_index` (the tag's exact span), `safe_urls`, `entities` (the turn refs) and `tree_range`.
+  `safe_urls` mixes the cited pages with images.openai.com thumbnails; titles for the pages are in the message's `search_result_groups[].entries[]` by `url`.
+  Until 2026-10-15 the converter left the tags as raw text and the answer lost all its source links while the verbatim check reported "verified"; now `genui_refs` turns each component into a span spliced with the other references, `cite` as a link list without the thumbnails and `memory_cite` as `*[memory citation]*`, and a component of any other type is reported in the run's notes.
 
 ## Claude (`claude.ai/share/<uuid>`)
 
