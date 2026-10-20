@@ -236,6 +236,18 @@ def genui_refs(text: str, meta: dict, counters: dict) -> list[dict]:
                      for u in comp.get("safe_urls") or []
                      if isinstance(u, dict) and u.get("url")
                      and urllib.parse.urlsplit(u["url"]).netloc != "images.openai.com"]
+        elif kind == "entity":
+            # `<Entity category="company" value="PitchBook"/>` (seen 2026-10-20): a named entity the
+            # page shows as its value, possibly with a hover card; the metadata entry carries no
+            # value, only `entities: [{"entity_type": "entity"}]`, so the name is read from the tag.
+            m = re.search(r'value="([^"]*)"', text[start:end])
+            if not m:
+                counters.setdefault("genui_unknown", []).append(kind)
+                continue
+            refs.append({"type": "genui_entity", "matched_text": text[start:end],
+                         "start_idx": start, "end_idx": end, "items": [], "value": m.group(1)})
+            counters["genui_entities"] = counters.get("genui_entities", 0) + 1
+            continue
         elif kind != "memory_cite":
             counters.setdefault("genui_unknown", []).append(kind)
             continue
@@ -268,6 +280,12 @@ def apply_citations(text: str, refs: list, counters: dict) -> str:
         links = _ref_links(ref)
         if links:
             counters["citations_linked"] = counters.get("citations_linked", 0) + len(links)
+        if ref.get("type") == "client_defined_widget" and not links:
+            # A rendered code block (`category` `code_block`, seen 2026-10-20): `matched_text` is the
+            # fenced block, which is already in the text, and its span can point elsewhere, so it is
+            # neither spliced nor searched for; the block stays as the model wrote it.
+            counters["widgets_in_text"] = counters.get("widgets_in_text", 0) + 1
+            continue
         if ref.get("type") == "sources_footnote" or (isinstance(start, int) and start >= len(text)):
             if links:
                 tail.append(", ".join(f"[{lab}]({url})" for lab, url in links))
@@ -288,6 +306,8 @@ def apply_citations(text: str, refs: list, counters: dict) -> str:
     for start, end, ref, links in sorted(spans, key=lambda s: -s[0]):
         if ref.get("type") == "genui_memory_cite":
             rendered = "*[memory citation]*"
+        elif ref.get("type") == "genui_entity":
+            rendered = ref.get("value") or ""
         elif ref.get("type") == "genui_cite" and links:
             # The tag follows its sentence after a space, so the link list needs no space of its own.
             gap = "" if start and text[start - 1].isspace() else " "
@@ -404,6 +424,10 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
         notes.append(f"{counters['citations_to_tail']} whitespace-marker citation(s) moved to the Sources line")
     if counters.get("citations_unplaced"):
         notes.append(f"{counters['citations_unplaced']} citation(s) could not be placed and are NOT in the file")
+    if counters.get("genui_entities"):
+        notes.append(f"{counters['genui_entities']} genui entity tag(s) written as their names")
+    if counters.get("widgets_in_text"):
+        notes.append(f"{counters['widgets_in_text']} rendered code block(s) left as written in the text")
     if counters.get("genui_unknown"):
         kinds = ", ".join(sorted(set(map(str, counters["genui_unknown"]))))
         notes.append(f"{len(counters['genui_unknown'])} genui component(s) of unknown type left as written ({kinds})")

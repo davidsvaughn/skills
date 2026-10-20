@@ -39,6 +39,12 @@ Kinds seen on 2026-09-23, with what the converter does:
 - `assistant`, `text`, recipient `api_tool.call_tool`, and the `tool` reply after it: both say only "The output of this plugin was redacted."
   The converter skips them without a note (see `TODO.md`).
 - Tool results are not published: container and plugin output comes through redacted (by 2026-09-18, and seen again 2026-09-23).
+- A "writing block" (the copyable card ChatGPT shows for a drafted prompt or text) is plain text in the assistant message's `content.parts`: a line `:::writing{variant="standard" id="<digits>"}`, the drafted text, and a closing `:::` line (seen 2026-10-01, share `6abe7525-...`, model `gpt-6.1-sol-wm`).
+  The converter writes it out verbatim, directive lines included; a markdown viewer shows those lines as text and renders the drafted text as ordinary markdown.
+- A user message's text can already carry ChatGPT's own autolinking, including links it mangled when a URL was followed by `).` (seen 2026-10-01, share `6abe7525-...`: `[https://.../2609.17488).](https://.../2609.17488\).)` sits in `content.parts` as stored).
+  That is the source, not a converter bug; the transcript keeps it verbatim.
+- A `thoughts` summary can contain invisible Unicode isolates, U+2068 and U+2069, around tool names and verbs (seen 2026-10-01, share `6abe7579-...`, model `gpt-6-astra-wm`, on a "Searched the web and used GitHub" summary).
+  They are in the payload as stored, and the transcript keeps them; they do not show when rendered but can break a plain-text grep for the words they wrap.
 - A long answer can be published as one merged message plus its fragments (seen 2026-10-15, model `gpt-6-thinking`).
   The merged message has `is_merged_message` and `source_message_ids`; each fragment has `is_message_fragment`, `merged_message_id` and `is_visually_hidden_from_conversation`, so the converter skips the fragments and writes the merged message, which holds the whole text.
   The fragments carried `sources_footnote` references with no sources in them, and the merged message carried none, so nothing was lost by skipping them.
@@ -48,6 +54,7 @@ Kinds seen on 2026-09-23, with what the converter does:
 ### Citations
 
 - Citations are private-use code points U+E200..U+E206 around an opaque id, inside the message text (by 2026-09-18).
+  On 2026-10-01 (share `6abe7525-...`, model `gpt-6.1-sol-wm`) the marker was `U+E200 genui U+E202 {"citation":{"ref":"turn0view2"}} U+E201`, a `genui` payload rather than a bare id; it still had a matching `content_references` span, and the converter rendered it as a link with no change needed.
 - The sources are in the message's `metadata.content_references`, each with `matched_text`, `start_idx`, `end_idx` and its links in `item`, `items`, `fallback_items` or `sources`.
 - The end-of-message source list is a reference of `type` `sources_footnote` whose `matched_text` is a single space and whose `start_idx` is usually past the end of the text, so splicing by span is the only safe placement; a string replace of the marker hits the wrong spot.
 - The footnote's `start_idx` is not always past the end (seen 2026-09-26, share `6ab7587c-...`, model `gpt-5-6-thinking`, and again on the 2026-09-19 share `6aade23c-...`).
@@ -66,6 +73,15 @@ Kinds seen on 2026-09-23, with what the converter does:
   Their sources are not in `content_references` (which held only `followup_a` entries there) but in `metadata.genui_components`: one entry per tag with `type`, `start_index`, `end_index` (the tag's exact span), `safe_urls`, `entities` (the turn refs) and `tree_range`.
   `safe_urls` mixes the cited pages with images.openai.com thumbnails; titles for the pages are in the message's `search_result_groups[].entries[]` by `url`.
   Until 2026-10-15 the converter left the tags as raw text and the answer lost all its source links while the verbatim check reported "verified"; now `genui_refs` turns each component into a span spliced with the other references, `cite` as a link list without the thumbnails and `memory_cite` as `*[memory citation]*`, and a component of any other type is reported in the run's notes.
+- A genui message can also carry `<Entity category="company" value="PitchBook"/>` tags, which the page shows as the bare name (seen 2026-10-20, share `6ad78688-...`, model `gpt-6-thinking`, five of them in a table column).
+  Each has a `genui_components` entry of `type` `entity` with the tag's span and `entities: [{"entity_type": "entity"}]`, and nothing else: no value, no link, no id, so the name has to be read from the tag's `value` attribute.
+  Until 2026-10-20 the tags were left as written (and reported as an unknown type); now `genui_refs` renders each as its value, and the run's notes count them.
+  Only `category="company"` has been seen; other categories are assumed to carry the same `value` attribute.
+- The same answer drew a diagram as genui layout markup with Svelte-style loops inside an `<svg>`: `<box border radius="xl" padding={3} gap={2}>`, `{#each [55,170,285] as x}` ... `{/each}`, attributes such as `d={`M170 45 L${x} 96`}`, and a `<caption>` (seen 2026-10-20, share `6ad78688-...`).
+  It is plain text in `content.parts` with no `genui_components` entry, and the converter keeps it verbatim; a markdown viewer shows it as raw markup, so the diagram is readable only in the source.
+- A fenced code block can come with a `content_references` entry of `type` `client_defined_widget`, `category` `code_block`, whose `data` repeats the block's `content` and `language` and whose `matched_text` is the whole fenced block (seen 2026-10-20, share `6ad78688-...`).
+  Its span (`start_idx`, `end_idx`) did not cover the block but a table 1,500 characters earlier, so the converter's text search found the block and counted it as a citation "placed by text search"; the block was kept either way, because a link-less span of real text is never removed.
+  Now a link-less `client_defined_widget` is skipped before any placement and counted in the run's notes as a rendered code block left as written.
 
 ## Claude (`claude.ai/share/<uuid>`)
 
