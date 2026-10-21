@@ -248,6 +248,37 @@ def genui_refs(text: str, meta: dict, counters: dict) -> list[dict]:
                          "start_idx": start, "end_idx": end, "items": [], "value": m.group(1)})
             counters["genui_entities"] = counters.get("genui_entities", 0) + 1
             continue
+        elif kind == "link":
+            # `<Link url="..." title="..."/>` (seen 2026-10-21): a link button; `safe_urls` holds the
+            # same url with `?utm_source=chatgpt.com` added, so the tag's own url and title are used.
+            tag = text[start:end]
+            url = re.search(r'url="([^"]*)"', tag)
+            title = re.search(r'title="([^"]*)"', tag)
+            if not url:
+                counters.setdefault("genui_unknown", []).append(kind)
+                continue
+            refs.append({"type": "genui_link", "matched_text": tag, "start_idx": start, "end_idx": end,
+                         "items": [], "value": (title.group(1) if title else "") or url.group(1),
+                         "url": url.group(1)})
+            counters["genui_links"] = counters.get("genui_links", 0) + 1
+            continue
+        elif kind == "async_image":
+            # `<AsyncImage query="..." aspectRatio="5:4" maxWidth="128px"/>` (seen 2026-10-21): a picture
+            # the page finds by search; `safe_urls` is the page it came from, then images.openai.com
+            # copies of it, which are thumbnails rather than sources and are left out.
+            tag = text[start:end]
+            query = re.search(r'query="([^"]*)"', tag)
+            if not query:
+                counters.setdefault("genui_unknown", []).append(kind)
+                continue
+            pages = [u["url"] for u in comp.get("safe_urls") or []
+                     if isinstance(u, dict) and u.get("url")
+                     and urllib.parse.urlsplit(u["url"]).netloc != "images.openai.com"]
+            refs.append({"type": "genui_async_image", "matched_text": tag, "start_idx": start,
+                         "end_idx": end, "items": [], "value": query.group(1),
+                         "url": pages[0] if pages else ""})
+            counters["genui_images"] = counters.get("genui_images", 0) + 1
+            continue
         elif kind != "memory_cite":
             counters.setdefault("genui_unknown", []).append(kind)
             continue
@@ -308,6 +339,12 @@ def apply_citations(text: str, refs: list, counters: dict) -> str:
             rendered = "*[memory citation]*"
         elif ref.get("type") == "genui_entity":
             rendered = ref.get("value") or ""
+        elif ref.get("type") == "genui_link":
+            rendered = f"[{ref['value'].replace(']', ')')}]({ref['url']})"
+        elif ref.get("type") == "genui_async_image":
+            source = ref.get("url")
+            where = f" from [{urllib.parse.urlsplit(source).netloc}]({source})" if source else ""
+            rendered = f"*[image: {ref['value']}{where}]*"
         elif ref.get("type") == "genui_cite" and links:
             # The tag follows its sentence after a space, so the link list needs no space of its own.
             gap = "" if start and text[start - 1].isspace() else " "
@@ -426,6 +463,10 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
         notes.append(f"{counters['citations_unplaced']} citation(s) could not be placed and are NOT in the file")
     if counters.get("genui_entities"):
         notes.append(f"{counters['genui_entities']} genui entity tag(s) written as their names")
+    if counters.get("genui_links"):
+        notes.append(f"{counters['genui_links']} genui link button(s) written as markdown links")
+    if counters.get("genui_images"):
+        notes.append(f"{counters['genui_images']} genui image(s) written as an image note with the search query")
     if counters.get("widgets_in_text"):
         notes.append(f"{counters['widgets_in_text']} rendered code block(s) left as written in the text")
     if counters.get("genui_unknown"):

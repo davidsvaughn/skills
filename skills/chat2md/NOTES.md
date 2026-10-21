@@ -77,6 +77,13 @@ Kinds seen on 2026-09-23, with what the converter does:
   Each has a `genui_components` entry of `type` `entity` with the tag's span and `entities: [{"entity_type": "entity"}]`, and nothing else: no value, no link, no id, so the name has to be read from the tag's `value` attribute.
   Until 2026-10-20 the tags were left as written (and reported as an unknown type); now `genui_refs` renders each as its value, and the run's notes count them.
   Only `category="company"` has been seen; other categories are assumed to carry the same `value` attribute.
+- A genui message can carry `<Link url="https://..." title="EDGAR APIs"/>` tags, a link button the page shows by its title, inline in prose or inside a layout `<text>` (seen 2026-10-21, share `6ad91f5b-...`, model `gpt-6-thinking`, four of them).
+  Each has a `genui_components` entry of `type` `link` with the tag's span and one `safe_urls` entry: the tag's url with `?utm_source=chatgpt.com` added, and no title.
+  Until 2026-10-21 the tags were left as written and reported as an unknown type (the url and title survived in the raw tag); now `genui_refs` renders each as `[title](url)` from the tag's own attributes.
+- The same answer had `<AsyncImage query="Tesla vehicle factory ..." aspectRatio="5:4" maxWidth="128px"/>` tags, a picture the page finds by the search query, beside a card of text (seen 2026-10-21, share `6ad91f5b-...`, two of them).
+  Each has a `genui_components` entry of `type` `async_image` with the tag's span, `genui_attributes` (`aspectRatio`, `maxWidth`) and `safe_urls`: first a web page, then several images.openai.com copies.
+  The first url is assumed, not confirmed against the page, to be where the picture came from; it matched the subject both times.
+  Now `genui_refs` renders each as `*[image: <query> from [<host>](<first url>)]*`, leaving out the thumbnails.
 - The same answer drew a diagram as genui layout markup with Svelte-style loops inside an `<svg>`: `<box border radius="xl" padding={3} gap={2}>`, `{#each [55,170,285] as x}` ... `{/each}`, attributes such as `d={`M170 45 L${x} 96`}`, and a `<caption>` (seen 2026-10-20, share `6ad78688-...`).
   It is plain text in `content.parts` with no `genui_components` entry, and the converter keeps it verbatim; a markdown viewer shows it as raw markup, so the diagram is readable only in the source.
 - A fenced code block can come with a `content_references` entry of `type` `client_defined_widget`, `category` `code_block`, whose `data` repeats the block's `content` and `language` and whose `matched_text` is the whole fenced block (seen 2026-10-20, share `6ad78688-...`).
