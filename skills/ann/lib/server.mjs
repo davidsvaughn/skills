@@ -13,6 +13,7 @@ import {execFileSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {analyze, render, threadInfo} from './render.mjs'
 import {addComment, addGeneral, reply, editComment, deleteComment, resolve, EditError, cleanAuthor} from './edit.mjs'
+import {availability, loadKey, startDictation, DEFAULT_MODEL} from './dictation.mjs'
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url))
 const MIME = {
@@ -100,8 +101,9 @@ export async function serve(opts) {
   let version = hashOf(source)
   let rendered = null
   const undo = []
-  const clients = new Set()
+  const clients = new Map() // SSE response -> client id
   let port = 0
+  let dictation = null // {client, session}: one microphone, so one dictation per server
 
   function doc() {
     if (!rendered || rendered.version !== version) {
@@ -132,7 +134,12 @@ export async function serve(opts) {
 
   function broadcast(event, data) {
     const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
-    for (const c of clients) c.write(msg)
+    for (const c of clients.keys()) c.write(msg)
+  }
+
+  // Dictation events go only to the tab that started it.
+  function tell(client, event, data) {
+    for (const [c, id] of clients) if (id === client) c.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   }
 
   // Outside changes: Claude revising the doc, an editor saving it.
@@ -177,7 +184,8 @@ export async function serve(opts) {
       const entry = readRegistry(file)
       if (entry && entry.pid === process.pid) fs.unlinkSync(registryPath(file))
     } catch {}
-    for (const c of clients) c.end()
+    dictation?.session.stop(true, 'server exit')
+    for (const c of clients.keys()) c.end()
     server.close()
     process.exit(0)
   }
@@ -234,8 +242,9 @@ export async function serve(opts) {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     })
-    res.write(`event: hello\ndata: ${JSON.stringify({version, pid: process.pid})}\n\n`)
-    clients.add(res)
+    const client = crypto.randomBytes(8).toString('hex')
+    res.write(`event: hello\ndata: ${JSON.stringify({version, pid: process.pid, client, dictation: availability()})}\n\n`)
+    clients.set(res, client)
     clearTimeout(idleTimer)
     log(`tab connected (${clients.size} open)`)
     const hb = setInterval(() => res.write(': ping\n\n'), 25_000)
@@ -243,6 +252,7 @@ export async function serve(opts) {
       clearInterval(hb)
       clients.delete(res)
       log(`tab disconnected (${clients.size} open)`)
+      if (dictation?.client === client) dictation.session.stop(true, 'its tab disconnected')
       if (!clients.size) armIdle('no tab connected')
     })
   }
@@ -310,6 +320,44 @@ export async function serve(opts) {
     return json(res, 200, {doc: d, summary: out.summary})
   }
 
+  // POST api/dictate {client, action: start | stop | cancel}. Progress arrives on the client's event stream.
+  async function dictate(req, res) {
+    let b
+    try {
+      b = await readJson(req)
+    } catch (e) {
+      return json(res, 400, {error: e.message})
+    }
+    const client = str(b.client)
+    if (!client || ![...clients.values()].includes(client)) return json(res, 409, {error: 'This tab is not connected; reload the page.'})
+    if (b.action === 'start') {
+      if (dictation && dictation.client !== client) return json(res, 409, {error: 'Dictation is running in another tab.'})
+      if (dictation) return json(res, 200, {ok: true})
+      const av = availability()
+      if (!av.available) return json(res, 422, {error: av.reason})
+      const maxMin = Number(process.env.ANN_DICTATION_MAX_MINUTES ?? 15)
+      const entry = {client}
+      entry.session = startDictation({
+        key: loadKey().key,
+        model: process.env.ANN_DICTATION_MODEL || DEFAULT_MODEL,
+        source: process.env.ASSEMBLYAI_AUDIO_SOURCE || null,
+        maxMs: maxMin > 0 ? maxMin * 60_000 : 0,
+        log,
+        emit: (e) => {
+          tell(client, 'dictation', e)
+          if ((e.phase === 'done' || e.phase === 'error') && dictation === entry) dictation = null
+        },
+      })
+      if (entry.session.phase !== 'done' && entry.session.phase !== 'error') dictation = entry
+      return json(res, 200, {ok: true})
+    }
+    if (b.action === 'stop' || b.action === 'cancel') {
+      if (dictation?.client === client) dictation.session.stop(b.action === 'cancel', b.action)
+      return json(res, 200, {ok: true})
+    }
+    return json(res, 400, {error: 'action must be start, stop or cancel'})
+  }
+
   const server = http.createServer(async (req, res) => {
     try {
       const host = req.headers.host || ''
@@ -345,6 +393,7 @@ export async function serve(opts) {
       }
       if (req.method === 'POST') {
         if (!/^application\/json/.test(req.headers['content-type'] || '')) return send(res, 415, 'JSON only')
+        if (rel === 'api/dictate') return await dictate(req, res)
         const m = /^api\/(comment|general|reply|edit|delete|resolve|undo)$/.exec(rel)
         if (!m) return send(res, 404, 'not found')
         return await mutate(m[1], req, res)

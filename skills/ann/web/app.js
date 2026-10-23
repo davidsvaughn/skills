@@ -19,7 +19,13 @@ const state = {
   pending: null, // {start, end, quote, range} from the current selection
   composer: null, // {mode: 'new'|'general'|'reply'|'edit', key, start, end, quote, thread, comment, stale}
   drafts: new Map(),
+  client: null, // this tab's id on the server's event stream
+  dictation: {available: false, reason: 'Not connected.'},
+  dict: null, // {phase, before, after, rendered} while dictating into the composer
 }
+const micEl = $('#mic')
+const hintEl = $('#composer-hint')
+const HINT = hintEl.textContent
 
 // ---------------------------------------------------------------------------------------------------------
 // Server
@@ -42,10 +48,13 @@ async function post(path, body) {
 function connect() {
   const es = new EventSource('api/events')
   es.addEventListener('hello', async (e) => {
+    const {version, client, dictation} = JSON.parse(e.data)
+    state.client = client
+    if (dictation) state.dictation = dictation
     setConnected(true)
-    const {version} = JSON.parse(e.data)
     if (!state.doc || state.doc.version !== version) applyDoc(await getDoc())
   })
+  es.addEventListener('dictation', (e) => onDictation(JSON.parse(e.data)))
   es.addEventListener('doc', async (e) => {
     const {version} = JSON.parse(e.data)
     if (state.doc && state.doc.version === version) return
@@ -59,6 +68,9 @@ function setConnected(on) {
   document.body.classList.toggle('offline', !on)
   setStatus(on ? 'connected' : 'lost', on ? 'connected' : 'server stopped')
   for (const b of [$('#general'), $('#undo'), fabEl]) b.disabled = !on
+  // The server stops a dictation whose tab disconnects; the text so far stays in the box.
+  if (!on && state.dict) endDictation('The server connection dropped, so dictation stopped. The text so far is kept.')
+  renderMic()
 }
 
 let statusTimer = null
@@ -313,6 +325,7 @@ function draftKey(mode, target) {
 
 function openComposer(mode, target = {}) {
   if (!state.connected) return toast('The server is not connected.')
+  if (state.dict) return toast('Stop dictation first (Alt+S).')
   if (state.composer) state.drafts.set(state.composer.key, textEl.value)
   const key = draftKey(mode, target)
   const cm = {mode, key, stale: false}
@@ -345,6 +358,7 @@ function threadRef(t) {
 
 function closeComposer(keepDraft = false) {
   if (!state.composer) return
+  if (state.dict) cancelDictation()
   if (keepDraft) state.drafts.set(state.composer.key, textEl.value)
   else state.drafts.delete(state.composer.key)
   const wasEdit = state.composer.mode === 'edit'
@@ -410,6 +424,7 @@ function showError(msg) {
 async function saveComposer() {
   const cm = state.composer
   if (!cm || state.busy) return
+  if (state.dict) return showError('Stop dictation first (Alt+S or the microphone button); the last words are still arriving.')
   const text = textEl.value.trim()
   if (!text) return showError('Type a comment first.')
   if (cm.stale) return showError(cm.mode === 'new' ? 'Select the text again first.' : 'That annotation is gone; cancel or pick another one.')
@@ -457,11 +472,15 @@ composerEl.addEventListener('click', (e) => {
   const act = e.target.closest('[data-act]')?.dataset.act
   if (act === 'save') saveComposer()
   if (act === 'cancel') closeComposer()
+  if (act === 'mic') toggleDictation()
 })
 textEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     saveComposer()
+  } else if (e.key === 'Escape' && state.dict) {
+    e.preventDefault()
+    cancelDictation()
   } else if (e.key === 'Escape') {
     if (textEl.value.trim() === '') closeComposer()
     else showError('Clear the text or press Cancel to discard it.')
@@ -469,8 +488,103 @@ textEl.addEventListener('keydown', (e) => {
 })
 textEl.addEventListener('input', () => {
   $('#composer-error').hidden = true
+  const d = state.dict
+  if (d && !d.detached && textEl.value !== d.rendered) {
+    // Typing wins: stop listening rather than overwrite the edit with the next transcript.
+    d.detached = true
+    stopDictation()
+  }
   layout()
 })
+
+// ---------------------------------------------------------------------------------------------------------
+// Dictation: the server records the microphone and streams it to AssemblyAI. The transcript so far arrives as
+// `dictation` events and replaces what this dictation inserted at the caret.
+
+const MIC_HINT = {
+  connecting: 'Connecting… Esc cancels',
+  mic: 'Starting the microphone… Esc cancels',
+  recording: 'Listening · Alt+S stops · Esc cancels',
+  finishing: 'Finishing the last words…',
+}
+
+function renderMic() {
+  const d = state.dict
+  micEl.disabled = !state.connected || (!d && !state.dictation.available)
+  micEl.dataset.state = d ? d.phase : 'idle'
+  micEl.setAttribute('aria-pressed', d ? 'true' : 'false')
+  micEl.title = d ? 'Stop dictation (Alt+S)' : state.dictation.available ? 'Dictate (Alt+S)' : state.dictation.reason || 'Dictation is unavailable.'
+  hintEl.textContent = d ? MIC_HINT[d.phase] || HINT : HINT
+  hintEl.classList.toggle('live', !!d)
+}
+
+async function toggleDictation() {
+  if (state.dict) return stopDictation()
+  if (!state.connected || !state.composer) return
+  if (!state.dictation.available) return showError(state.dictation.reason || 'Dictation is unavailable.')
+  const v = textEl.value
+  const [a, b] = [textEl.selectionStart, textEl.selectionEnd]
+  state.dict = {phase: 'connecting', original: v, before: v.slice(0, a), after: v.slice(b), rendered: v, inserted: false, detached: false}
+  $('#composer-error').hidden = true
+  renderMic()
+  textEl.focus()
+  try {
+    const r = await post('api/dictate', {client: state.client, action: 'start'})
+    if (!r.ok) endDictation(r.error || `Error ${r.status}`)
+  } catch (e) {
+    endDictation(`Could not reach the server: ${e.message}`)
+  }
+}
+
+function stopDictation() {
+  const d = state.dict
+  if (!d || d.phase === 'finishing') return
+  d.phase = 'finishing'
+  renderMic()
+  post('api/dictate', {client: state.client, action: 'stop'}).catch(() => endDictation('Could not reach the server; the text so far is kept.'))
+}
+
+// Esc: stop without waiting for the last words and put back the text from before, unless it was edited since.
+function cancelDictation() {
+  const d = state.dict
+  if (!d) return
+  if (textEl.value === d.rendered) textEl.value = d.original
+  state.dict = null
+  renderMic()
+  post('api/dictate', {client: state.client, action: 'cancel'}).catch(() => {})
+  layout()
+}
+
+function endDictation(msg) {
+  state.dict = null
+  renderMic()
+  if (msg) showError(msg)
+  else $('#composer-error').hidden = true // e.g. an Enter refused while the last words were arriving
+}
+
+function onDictation(e) {
+  const d = state.dict
+  if (!d) return // cancelled here, or a late event
+  if (e.text && !d.detached) {
+    const sep1 = d.before && !/\s$/.test(d.before) ? ' ' : ''
+    const sep2 = d.after && !/^\s/.test(d.after) ? ' ' : ''
+    const v = d.before + sep1 + e.text + sep2 + d.after
+    if (v !== textEl.value) {
+      textEl.value = v
+      const caret = (d.before + sep1 + e.text).length
+      textEl.setSelectionRange(caret, caret)
+      layout()
+    }
+    d.rendered = v
+    d.inserted = true
+  }
+  if (e.phase === 'done') endDictation(d.detached ? 'Dictation stopped when you edited the text; your edits are kept.' : null)
+  else if (e.phase === 'error') endDictation(`${e.error} The text so far is kept.`)
+  else {
+    if (d.phase !== 'finishing') d.phase = e.phase // a stop asked for here outranks progress already in flight
+    renderMic()
+  }
+}
 
 // ---------------------------------------------------------------------------------------------------------
 // Direct actions: delete, resolve, undo
@@ -504,7 +618,12 @@ $('#general').addEventListener('click', () => openComposer('general'))
 
 document.addEventListener('keydown', (e) => {
   const inField = /^(TEXTAREA|INPUT)$/.test(document.activeElement?.tagName)
-  if (e.key.toLowerCase() === 'm' && e.ctrlKey && e.shiftKey) {
+  if (e.code === 'KeyS' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (state.composer && !composerEl.hidden) {
+      e.preventDefault()
+      toggleDictation()
+    }
+  } else if (e.key.toLowerCase() === 'm' && e.ctrlKey && e.shiftKey) {
     if (state.pending) {
       e.preventDefault()
       openComposer('new', state.pending)

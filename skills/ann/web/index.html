@@ -32,8 +32,11 @@
       <textarea id="composer-text" rows="3" placeholder="Write a comment"></textarea>
       <div id="composer-error" class="error" hidden></div>
       <div class="composer-foot">
-        <span class="hint">Enter saves · Shift+Enter newline · Esc cancels</span>
-        <button class="btn primary" type="button" data-act="save">Save</button>
+        <span id="composer-hint" class="hint">Enter saves · Shift+Enter newline · Esc cancels</span>
+        <span class="foot-buttons">
+          <button id="mic" class="btn mic" type="button" data-act="mic" title="Dictate (Alt+S)" aria-pressed="false" disabled><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1Zm-4.25 6a.75.75 0 0 0-1.5 0 5.75 5.75 0 0 0 5 5.7V14.5H5.5a.75.75 0 0 0 0 1.5h5a.75.75 0 0 0 0-1.5H8.75v-1.8a5.75 5.75 0 0 0 5-5.7.75.75 0 0 0-1.5 0 4.25 4.25 0 0 1-8.5 0Z"/></svg><span class="sr-only">Dictate</span></button>
+          <button class="btn primary" type="button" data-act="save">Save</button>
+        </span>
       </div>
     </div>
   </aside>

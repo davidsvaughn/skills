@@ -21,8 +21,10 @@ lib/criticmarkup.mjs   scan CriticMarkup, group into threads, mask
 lib/render.mjs         parse, analyze, align, render HTML with source offsets, threadInfo()
 lib/edit.mjs           addComment, addGeneral, reply, editComment, deleteComment, resolve, and the safety check
 lib/server.mjs         one file served on 127.0.0.1 with a token in the path; SSE reload; atomic writes; undo
+lib/dictation.mjs      live dictation: parec -> AssemblyAI v3 streaming -> transcript events; the key lookup
 web/                   index.html, app.js, app.css (no build step, no framework)
 test/edit.test.mjs     unit tests: node --test test/*.test.mjs
+test/dictation.test.mjs  dictation session against a fake socket and a fake parec
 dev/corpus-check.mjs   read-only render of every tracked .md in a repo, checks the render invariant
 dev/fuzz.mjs           random selections on real docs, in memory; every accepted edit undone by hand and compared
 package.json           exact-pinned deps (mdast-util-from-markdown, gfm, frontmatter); npm ci after a copy
@@ -52,6 +54,27 @@ typed text is kept and you are asked to reselect. The author name is `ANN_AUTHOR
 
 A server exits 30 minutes after the last tab disconnects (`--idle-minutes`, 0 = never), on SIGTERM
 (`stop`), and removes its registry entry.
+
+### Dictation
+
+The microphone button in the comment box (or Alt+S while the box is open) dictates into it live, through AssemblyAI's streaming API.
+Words appear at the caret as you speak, and the recognizer may revise them while you talk; a selection in the box is replaced.
+Wait for the button to turn red ("Listening") before speaking; the microphone opens only once AssemblyAI is ready.
+Alt+S or the button again stops it, and the last words arrive within about a second; Enter is refused until then.
+Escape cancels and puts back the text from before, unless you edited it meanwhile.
+Typing during dictation stops it and keeps your edits.
+Opening another comment box is refused while dictation runs, Cancel discards it, and closing or leaving the tab stops it on the server.
+
+Requirements: Node 22 or later (built-in `WebSocket`), `parec` on the PATH (PulseAudio, or PipeWire's pulse layer), and an AssemblyAI key.
+The key comes from `ASSEMBLY_API_KEY` or `ASSEMBLYAI_API_KEY` in the server's environment, else from the same names in `${XDG_CONFIG_HOME:-~/.config}/assemblyai/env` (dotenv format; keep it mode 600).
+The file matters because the server inherits the environment of whatever ran `ann.mjs open`, and a key exported only for interactive shells is missing there.
+Without these the button is disabled and its tooltip says what is missing.
+
+The server, not the browser, records the microphone: each server listens on a new port, browsers remember microphone permission per origin, so recording in the page would ask for permission on every new document.
+It also keeps the key out of the page.
+The audio is streamed and never written to disk.
+Settings, all environment variables of the server: `ASSEMBLYAI_AUDIO_SOURCE` picks a PulseAudio source (`pactl list sources short`), `ANN_DICTATION_MODEL` the speech model (default `universal-3-6-pro`), `ANN_DICTATION_MAX_MINUTES` stops a forgotten dictation (default 15, 0 = never; the text so far is kept).
+AssemblyAI bills streaming by the session hour.
 
 ## How the core works
 
@@ -160,6 +183,12 @@ directory plus `fs.watchFile`, debounced) sees no echo; a real outside change is
 `{before, afterHash}` and restores `before` only while the file still hashes to `afterHash`. The log shows every
 event with timing.
 
+Dictation: the SSE `hello` carries a per-tab `client` id and `dictation {available, reason}`.
+`POST api/dictate {client, action: start|stop|cancel}` controls the one dictation a server runs (one microphone); a start from another tab is a 409.
+Progress goes only to the owning tab as SSE `dictation {phase, text, error}`, with phase connecting, mic, recording, finishing, then done or error, and `text` the whole transcript so far (turns joined in `turn_order`, each revised in place).
+The page splices `text` between the text before and after the caret as it was at the start.
+The owning tab's event stream closing cancels the dictation.
+
 ## Verification (done 2026-09-25, all against copies in a scratch directory, never repo files)
 
 - Unit tests: 31, all pass (`node --test --test-reporter=tap test/*.test.mjs`).
@@ -184,6 +213,14 @@ event with timing.
 - Not yet done: opening a browser-annotated file in VS Code's preview with the md-comments extension to confirm
   it lists the comments.
 
+## Verification of dictation (2026-10-23)
+
+- Unit tests: 8 in `test/dictation.test.mjs` (39 in all), all pass: handshake parameters, microphone only after `Begin`, 100 ms framing with the tail padded, turn revision and ordering, drain then `Terminate` on stop, cancel, stop while connecting, socket error, early close, a service `Error`, a failed `parec`, key precedence.
+- The handshake against the live service from Node's built-in `WebSocket`: `Begin` after 0.4 s with the model confirmed, `Termination` on `Terminate`.
+- End to end in Chromium with `playwright-cli`, headed, with an espeak clip played into a temporary PulseAudio null sink whose monitor was the server's source, and the key read from the config file with the environment variable unset: words appeared live and were revised in place ("the second table instead" became "the second table in section 4."), the saved comment landed in the file, stop took 0.4 s; insertion at a caret mid-text; Enter refused while recording; Escape restored the text from before; typing stopped dictation and kept the edit; leaving the page stopped the session and `parec` on the server; a server without a key reported the reason in `hello`.
+- Recording reported "Listening" 2.4 s after Alt+S on the idle null sink, 2 s of it waiting for `parec`'s first audio; not yet timed on a physical microphone.
+- Not yet done: a real voice through a physical microphone, and a long session.
+
 ## Known limits
 
 - Highlights may span paragraphs, list items and table rows; the check accepts them and the viewer renders
@@ -197,5 +234,7 @@ event with timing.
 - Suggestion authoring (`{++ ++}` etc.) is out of scope; they render and can be commented on.
 - An edit on a very large file costs three parses of the new text (0.7 s at 250 KB). Parsing only the
   region around the edit would weaken the check; a worker-thread parallel parse would save a third.
+- Dictation records on the machine running the server (always the local one, since it binds 127.0.0.1) and needs `parec`, so it works on Linux with PulseAudio or PipeWire, not on macOS or Windows as is.
+  One dictation runs per server; a second document's server can dictate at the same time and both would share the microphone.
 
 Source: [github.com/davidsvaughn/skills](https://github.com/davidsvaughn/skills), `skills/ann`.
