@@ -234,8 +234,10 @@ ins.cm-ins.hot, del.cm-del.hot { outline: 2px solid var(--card-hot); outline-off
 .foot-buttons { display: flex; gap: 0.4rem; flex: none; }
 .btn.mic { display: inline-flex; align-items: center; padding: 0.3rem 0.5rem; color: var(--muted); }
 .btn.mic:hover:not(:disabled) { color: var(--fg); }
-.btn.mic[data-state="connecting"], .btn.mic[data-state="mic"], .btn.mic[data-state="finishing"] { color: var(--accent); border-color: var(--accent); }
-.btn.mic[data-state="recording"] { color: #ffffff; background: var(--danger); border-color: transparent; animation: mic-pulse 1.4s ease-in-out infinite; }
+/* Red whenever the microphone is open: it opens at once and holds audio while the connection comes up. */
+.btn.mic[data-state="connecting"], .btn.mic[data-state="recording"] { color: #ffffff; background: var(--danger); border-color: transparent; }
+.btn.mic[data-state="recording"] { animation: mic-pulse 1.4s ease-in-out infinite; }
+.btn.mic[data-state="finishing"] { color: var(--accent); border-color: var(--accent); }
 @keyframes mic-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 30%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .btn.mic[data-state="recording"] { animation: none; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

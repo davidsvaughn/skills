@@ -65,9 +65,12 @@ export function availability(env = process.env) {
   return {available: true, reason: null}
 }
 
-// One dictation session. `emit({phase, text, error})` reports progress, where phase is connecting | mic |
-// recording | finishing | done | error, and text is the whole transcript so far. The session never emits after
-// done or error. `deps` replaces the WebSocket class and spawn for tests.
+// One dictation session. `emit({phase, text, error})` reports progress, where phase is connecting | recording |
+// finishing | done | error, and text is the whole transcript so far. The session never emits after done or
+// error. `deps` replaces the WebSocket class and spawn for tests.
+//
+// The microphone opens at once and its audio is held until the recognizer is ready, so words spoken right after
+// the key press are kept (push-to-talk gives no time to wait for the connection).
 export function startDictation({key, model = DEFAULT_MODEL, source = null, maxMs = 0, emit, log = () => {}, deps = {}}) {
   const WS = deps.WebSocket || WebSocket
   const spawn = deps.spawn || nodeSpawn
@@ -76,13 +79,16 @@ export function startDictation({key, model = DEFAULT_MODEL, source = null, maxMs
   url.searchParams.set('speech_model', model)
   const socket = new WS(url, {headers: {Authorization: key}})
   const turns = new Map()
+  const queue = [] // frames recorded before Begin
   let phase = 'connecting'
-  let capture = null
-  let timer = setTimeout(() => finish('Connection timed out.'), CONNECT_MS)
-  let capTimer = null
+  let began = false // Begin received
+  let stopping = false // a stop was asked for: drain the microphone, then Terminate once begun
+  let drained = false // the microphone's output has ended
   let error = null
   let stderr = ''
   let pending = Buffer.alloc(0)
+  let timer = setTimeout(() => finish('Connection timed out.'), CONNECT_MS)
+  const capTimer = maxMs ? setTimeout(() => stop(false, `${Math.round(maxMs / 60000)} min limit`), maxMs) : null
   const t0 = Date.now()
 
   const text = () =>
@@ -92,15 +98,16 @@ export function startDictation({key, model = DEFAULT_MODEL, source = null, maxMs
       .filter(Boolean)
       .join(' ')
   const report = () => emit({phase, text: text(), error})
+  const over = () => phase === 'done' || phase === 'error'
   report()
 
   function finish(err = null) {
-    if (phase === 'done' || phase === 'error') return
+    if (over()) return
     clearTimeout(timer)
     clearTimeout(capTimer)
     error = error || err
     phase = error ? 'error' : 'done'
-    capture?.kill('SIGKILL')
+    capture.kill('SIGKILL')
     try {
       socket.close()
     } catch {}
@@ -113,70 +120,62 @@ export function startDictation({key, model = DEFAULT_MODEL, source = null, maxMs
     else finish()
   }
 
+  function send(frame) {
+    if (!began) return queue.push(frame)
+    if (socket.readyState !== WS.OPEN) return
+    if (socket.bufferedAmount > MAX_BUFFERED) {
+      error = error || 'The network cannot keep up with the microphone.'
+      return stop()
+    }
+    socket.send(frame)
+  }
+
   // cancel: the page has thrown the text away, so do not wait for the last words.
   function stop(cancel = false, why = null) {
-    if (phase === 'done' || phase === 'error') return
+    if (over()) return
     if (why) log(`dictation stopping: ${why}`)
-    if (cancel || phase === 'connecting') return finish()
-    if (phase === 'finishing') return
+    if (cancel) return finish()
+    if (stopping) return
+    stopping = true
     phase = 'finishing'
     report()
-    clearTimeout(timer)
-    timer = setTimeout(() => finish('Timed out waiting for the last words.'), FINISH_MS)
-    if (capture) capture.kill('SIGTERM') // stdout 'end' sends the remaining audio, then Terminate
-    else terminate()
+    if (began) {
+      clearTimeout(timer)
+      timer = setTimeout(() => finish('Timed out waiting for the last words.'), FINISH_MS)
+    } // before Begin the connection timer keeps running
+    capture.kill('SIGTERM') // stdout 'end' sends the remaining audio, then Terminate
   }
 
-  function startCapture() {
-    const args = ['--raw', '--format=s16le', `--rate=${RATE}`, '--channels=1', '--latency-msec=100']
-    if (source) args.push(`--device=${source}`)
-    capture = spawn('parec', args, {stdio: ['ignore', 'pipe', 'pipe']})
-    phase = 'mic'
-    report()
-    capture.stderr.on('data', (d) => (stderr = (stderr + d).slice(-2000)))
-    capture.on('error', (e) => {
-      error = error || `Microphone capture failed: ${e.message}`
-      capture = null
-      finish()
-    })
-    capture.stdout.on('data', (chunk) => {
-      if (socket.readyState !== WS.OPEN || phase === 'done' || phase === 'error') return
-      if (phase === 'mic') {
-        phase = 'recording'
-        report()
-        if (maxMs) capTimer = setTimeout(() => stop(false, `${Math.round(maxMs / 60000)} min limit`), maxMs)
-      }
-      const audio = pending.length ? Buffer.concat([pending, chunk]) : chunk
-      let at = 0
-      for (; audio.length - at >= FRAME; at += FRAME) {
-        if (socket.bufferedAmount > MAX_BUFFERED) {
-          error = 'The network cannot keep up with the microphone.'
-          return stop()
-        }
-        socket.send(audio.subarray(at, at + FRAME))
-      }
-      pending = audio.subarray(at)
-    })
-    capture.stdout.on('end', () => {
-      if (socket.readyState !== WS.OPEN || phase === 'done' || phase === 'error') return
-      if (pending.length) {
-        const last = Buffer.alloc(FRAME)
-        pending.copy(last)
-        socket.send(last)
-        pending = Buffer.alloc(0)
-      }
-      if (phase !== 'finishing') {
-        error = error || `Microphone capture ended unexpectedly${stderr.trim() ? `: ${stderr.trim()}` : ''}.`
-        phase = 'finishing'
-        clearTimeout(timer)
-        timer = setTimeout(() => finish(), FINISH_MS)
-      }
-      terminate()
-    })
-  }
+  const args = ['--raw', '--format=s16le', `--rate=${RATE}`, '--channels=1', '--latency-msec=100']
+  if (source) args.push(`--device=${source}`)
+  const capture = spawn('parec', args, {stdio: ['ignore', 'pipe', 'pipe']})
+  capture.stderr.on('data', (d) => (stderr = (stderr + d).slice(-2000)))
+  capture.on('error', (e) => finish(`Microphone capture failed: ${e.message}`))
+  capture.stdout.on('data', (chunk) => {
+    if (over()) return
+    const audio = pending.length ? Buffer.concat([pending, chunk]) : chunk
+    let at = 0
+    for (; audio.length - at >= FRAME; at += FRAME) send(audio.subarray(at, at + FRAME))
+    pending = audio.subarray(at)
+  })
+  capture.stdout.on('end', () => {
+    if (over()) return
+    if (pending.length) {
+      const last = Buffer.alloc(FRAME)
+      pending.copy(last)
+      send(last)
+      pending = Buffer.alloc(0)
+    }
+    drained = true
+    if (!stopping) {
+      error = error || `Microphone capture ended unexpectedly${stderr.trim() ? `: ${stderr.trim()}` : ''}.`
+      stop()
+    }
+    if (began) terminate() // otherwise Begin terminates after sending the queue
+  })
 
   socket.addEventListener('message', (ev) => {
-    if (phase === 'done' || phase === 'error') return
+    if (over()) return
     let m
     try {
       m = JSON.parse(String(ev.data))
@@ -185,8 +184,16 @@ export function startDictation({key, model = DEFAULT_MODEL, source = null, maxMs
     }
     if (m.type === 'Begin') {
       clearTimeout(timer)
-      log(`dictation session ${m.id} (${m.configuration?.model || model})`)
-      startCapture() // open the microphone only once the recognizer is ready
+      began = true
+      log(`dictation session ${m.id} (${m.configuration?.model || model}), ${queue.length * 100} ms of audio held`)
+      for (const f of queue.splice(0)) send(f)
+      if (stopping) {
+        timer = setTimeout(() => finish('Timed out waiting for the last words.'), FINISH_MS)
+        if (drained) terminate()
+      } else {
+        phase = 'recording'
+        report()
+      }
     } else if (m.type === 'Turn') {
       turns.set(m.turn_order, m.transcript || '')
       report()
@@ -194,13 +201,13 @@ export function startDictation({key, model = DEFAULT_MODEL, source = null, maxMs
       finish()
     } else if (m.type === 'Error' || m.error) {
       error = error || String(m.error || m.message || 'Streaming service error')
-      if (capture && phase !== 'finishing') stop()
-      else finish()
+      if (stopping) finish()
+      else stop()
     }
   })
   socket.addEventListener('error', (ev) => finish(`Could not reach AssemblyAI${ev?.message ? ` (${ev.message})` : ''}; check the key, the account balance and the network.`))
   socket.addEventListener('close', (ev) => {
-    if (phase !== 'done' && phase !== 'error') finish(`The stream closed early (${ev.code}${ev.reason ? `: ${ev.reason}` : ''}).`)
+    if (!over()) finish(`The stream closed early (${ev.code}${ev.reason ? `: ${ev.reason}` : ''}).`)
   })
 
   return {stop, get phase() { return phase }}

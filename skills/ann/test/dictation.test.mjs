@@ -72,19 +72,31 @@ function session(extra = {}) {
   return {s, events, ws: FakeWS.last, sp, last: () => events.at(-1)}
 }
 
-test('connects with the key, the rate and the model, and opens the microphone only after Begin', () => {
+test('connects with the key, the rate and the model, and opens the microphone at once', () => {
   const {ws, sp, last} = session({source: 'my.mic'})
   assert.equal(ws.opts.headers.Authorization, 'k')
   assert.equal(ws.url.origin + ws.url.pathname, 'wss://streaming.assemblyai.com/v3/ws')
   assert.equal(ws.url.searchParams.get('sample_rate'), '16000')
   assert.equal(ws.url.searchParams.get('speech_model'), 'universal-3-6-pro')
   assert.equal(last().phase, 'connecting')
-  assert.equal(sp.calls.length, 0)
-  ws.server({type: 'Begin', id: 'x'})
   assert.equal(sp.calls.length, 1)
   assert.equal(sp.calls[0].bin, 'parec')
   assert.ok(sp.calls[0].args.includes('--rate=16000') && sp.calls[0].args.includes('--device=my.mic'))
-  assert.equal(last().phase, 'mic')
+  ws.server({type: 'Begin', id: 'x'})
+  assert.equal(last().phase, 'recording')
+})
+
+test('audio recorded before Begin is held and sent first, in order', async () => {
+  const {ws, sp} = session()
+  const cap = sp.calls[0].p
+  cap.stdout.write(Buffer.alloc(3200, 1))
+  cap.stdout.write(Buffer.alloc(3200, 2))
+  await tick()
+  assert.equal(ws.frames().length, 0, 'nothing sent before the recognizer is ready')
+  ws.server({type: 'Begin', id: 'x'})
+  cap.stdout.write(Buffer.alloc(3200, 3))
+  await tick()
+  assert.deepEqual(ws.frames().map((f) => f[0]), [1, 2, 3])
 })
 
 test('audio goes out in 100 ms frames; turns are revised in place and joined in order; stop drains then terminates', async () => {
@@ -124,13 +136,30 @@ test('cancel ends at once, without waiting for the last words', async () => {
   assert.equal(last().phase, 'done', 'nothing is emitted after done')
 })
 
-test('stop while still connecting closes without a microphone', () => {
+test('a press shorter than the connection: stop before Begin still sends the held audio, then terminates', async () => {
   const {s, ws, sp, last} = session()
+  const cap = sp.calls[0].p
+  cap.stdout.write(Buffer.alloc(3200 + 10))
+  await tick()
   s.stop()
+  assert.equal(last().phase, 'finishing')
+  await tick()
+  assert.equal(ws.frames().length, 0)
+  ws.server({type: 'Begin', id: 'x'})
+  assert.deepEqual(ws.frames().map((f) => f.length), [3200, 3200])
+  assert.deepEqual(ws.controls(), [{type: 'Terminate'}])
+  assert.equal(last().phase, 'finishing', 'still waiting for the words')
+  ws.server({type: 'Turn', turn_order: 0, transcript: 'Quick.', end_of_turn: true})
+  ws.server({type: 'Termination'})
+  assert.deepEqual(last(), {phase: 'done', text: 'Quick.', error: null})
+})
+
+test('cancel while still connecting ends at once', () => {
+  const {s, ws, sp, last} = session()
+  s.stop(true)
   assert.equal(last().phase, 'done')
   assert.ok(ws.closed)
-  ws.server({type: 'Begin', id: 'x'})
-  assert.equal(sp.calls.length, 0)
+  assert.ok(sp.calls[0].p.signals.includes('SIGKILL'))
 })
 
 test('a socket error or an early close is an error that keeps the text so far', async () => {
@@ -160,8 +189,7 @@ test('a service error during recording drains and terminates, then reports the e
 })
 
 test('a microphone that fails to start is an error', () => {
-  const {ws, sp, last} = session()
-  ws.server({type: 'Begin', id: 'x'})
+  const {sp, last} = session()
   sp.calls[0].p.emit('error', new Error('spawn parec ENOENT'))
   assert.equal(last().phase, 'error')
   assert.match(last().error, /Microphone capture failed: spawn parec ENOENT/)

@@ -57,10 +57,13 @@ A server exits 30 minutes after the last tab disconnects (`--idle-minutes`, 0 = 
 
 ### Dictation
 
-The microphone button in the comment box (or Alt+S while the box is open) dictates into it live, through AssemblyAI's streaming API.
+Hold Space in the comment box to dictate into it live, through AssemblyAI's streaming API, and release it to stop (push-to-talk).
+A tap still types a space: the space appears when the key comes up, or as soon as the next key goes down, so fast typing keeps its order; what is lost is holding Space to repeat spaces.
+The hold threshold is 300 ms (`HOLD_MS` in `web/app.js`).
+For longer dictation, Alt+S or the microphone button toggles it instead.
 Words appear at the caret as you speak, and the recognizer may revise them while you talk; a selection in the box is replaced.
-Wait for the button to turn red ("Listening") before speaking; the microphone opens only once AssemblyAI is ready.
-Alt+S or the button again stops it, and the last words arrive within about a second; Enter is refused until then.
+The microphone opens at once (the button turns red) and its audio is held until AssemblyAI is ready, about 0.3 to 0.4 s later, so you can speak as soon as you press.
+After release (or the second Alt+S) the last words arrive within about a second; Enter is refused until then, and so is a new Space hold.
 Escape cancels and puts back the text from before, unless you edited it meanwhile.
 Typing during dictation stops it and keeps your edits.
 Opening another comment box is refused while dictation runs, Cancel discards it, and closing or leaving the tab stops it on the server.
@@ -185,7 +188,8 @@ event with timing.
 
 Dictation: the SSE `hello` carries a per-tab `client` id and `dictation {available, reason}`.
 `POST api/dictate {client, action: start|stop|cancel}` controls the one dictation a server runs (one microphone); a start from another tab is a 409.
-Progress goes only to the owning tab as SSE `dictation {phase, text, error}`, with phase connecting, mic, recording, finishing, then done or error, and `text` the whole transcript so far (turns joined in `turn_order`, each revised in place).
+Progress goes only to the owning tab as SSE `dictation {phase, text, error}`, with phase connecting (microphone open, audio held), recording (after `Begin`), finishing, then done or error, and `text` the whole transcript so far (turns joined in `turn_order`, each revised in place).
+A stop before `Begin` still sends the held audio, then `Terminate`.
 The page splices `text` between the text before and after the caret as it was at the start.
 The owning tab's event stream closing cancels the dictation.
 
@@ -215,10 +219,13 @@ The owning tab's event stream closing cancels the dictation.
 
 ## Verification of dictation (2026-10-23)
 
-- Unit tests: 8 in `test/dictation.test.mjs` (39 in all), all pass: handshake parameters, microphone only after `Begin`, 100 ms framing with the tail padded, turn revision and ordering, drain then `Terminate` on stop, cancel, stop while connecting, socket error, early close, a service `Error`, a failed `parec`, key precedence.
+- Unit tests: 10 in `test/dictation.test.mjs` (41 in all), including audio held before `Begin` and a stop before `Begin`, all pass: handshake parameters, microphone only after `Begin`, 100 ms framing with the tail padded, turn revision and ordering, drain then `Terminate` on stop, cancel, stop while connecting, socket error, early close, a service `Error`, a failed `parec`, key precedence.
 - The handshake against the live service from Node's built-in `WebSocket`: `Begin` after 0.4 s with the model confirmed, `Termination` on `Terminate`.
-- End to end in Chromium with `playwright-cli`, headed, with an espeak clip played into a temporary PulseAudio null sink whose monitor was the server's source, and the key read from the config file with the environment variable unset: words appeared live and were revised in place ("the second table instead" became "the second table in section 4."), the saved comment landed in the file, stop took 0.4 s; insertion at a caret mid-text; Enter refused while recording; Escape restored the text from before; typing stopped dictation and kept the edit; leaving the page stopped the session and `parec` on the server; a server without a key reported the reason in `hello`.
-- Recording reported "Listening" 2.4 s after Alt+S on the idle null sink, 2 s of it waiting for `parec`'s first audio; not yet timed on a physical microphone.
+- End to end in Chromium with `playwright-cli`, headed, with an espeak clip played into a temporary PulseAudio null sink whose monitor was the server's source, and the key read from the config file with the environment variable unset (with Alt+S, before hold-Space existed): words appeared live and were revised in place ("the second table instead" became "the second table in section 4."), the saved comment landed in the file, stop took 0.4 s; insertion at a caret mid-text; Enter refused while recording; Escape restored the text from before; typing stopped dictation and kept the edit; leaving the page stopped the session and `parec` on the server; a server without a key reported the reason in `hello`.
+- Hold Space, same day, after the microphone was made to open at once: taps typed spaces (`a b  c`, a double space kept), a Space-then-x key rollover gave ` x` in order, a 200 ms press typed a space, a 600 ms silent hold ended with no text and no error, a held clip streamed live and its last words arrived 1.3 s after release.
+  To test speech starting at the press, a `module-pipe-source` virtual microphone fed in real time (with a background `parec` keeping it from suspending, which otherwise left 2 s of stale audio in the pipe) gave `parec`'s first audio in 5 ms; 300 ms of audio was held before `Begin` and "Hello there." arrived whole.
+  The null sink's monitor is a poor stand-in for start latency: its first audio came after 1 to 2 s and at about 70% of real time, which swallowed a short clip spoken at the press.
+- `parec` on the physical default microphone: first audio after 6 to 137 ms, at the full rate.
 - Not yet done: a real voice through a physical microphone, and a long session.
 
 ## Known limits

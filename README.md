@@ -6,7 +6,7 @@ Reference notes that are not skills live on the [`notes`](https://github.com/dav
 
 | Skill | Invoke | What it does | Needs |
 |---|---|---|---|
-| [ann](skills/ann) | `/ann [file \| question]` | Opens a markdown file in the browser; you select text and comment, and each comment lands in the `.md` file as CriticMarkup for Claude to address. Optional live dictation into the comment box (Alt+S). | Node 20+, `npm ci` once in the skill directory; dictation: Node 22+, `parec`, an AssemblyAI key |
+| [ann](skills/ann) | `/ann [file \| question]` | Opens a markdown file in the browser; you select text and comment, and each comment lands in the `.md` file as CriticMarkup for Claude to address. Optional live dictation into the comment box (hold Space). | Node 20+, `npm ci` once in the skill directory; dictation: Node 22+, `parec`, an AssemblyAI key |
 | [draft](skills/draft) | `/draft [question]` | Saves Claude's previous response (or an answer) to `.notes/drafts/` so you can annotate it with CriticMarkup in your editor. | nothing |
 | [chat2md](skills/chat2md) | a pasted share link | Converts a shared ChatGPT or claude.ai conversation into a complete markdown transcript, and checks that every message made it into the file. | Python 3; `playwright-cli` for some claude.ai links |
 | [handoff](skills/handoff) | `/handoff` | Writes the next numbered `HANDOFF-NNN.md`, a complete current-state snapshot for the next agent or session; earlier handoffs are never overwritten. | nothing |

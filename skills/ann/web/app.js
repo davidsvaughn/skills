@@ -475,6 +475,17 @@ composerEl.addEventListener('click', (e) => {
   if (act === 'mic') toggleDictation()
 })
 textEl.addEventListener('keydown', (e) => {
+  const plainSpace = e.key === ' ' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && !e.isComposing
+  if (plainSpace && (space || state.dict?.ptt)) {
+    e.preventDefault() // key repeat while held, or a press while the last words of a hold are still arriving
+    return
+  }
+  if (plainSpace && !state.dict && state.connected && state.dictation.available) {
+    e.preventDefault()
+    space = {held: false, timer: setTimeout(() => ((space.held = true), toggleDictation(true)), HOLD_MS)}
+    return
+  }
+  if (space && !space.held) spaceUp() // the next key went down before Space came up: it was a tap
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault()
     saveComposer()
@@ -502,29 +513,55 @@ textEl.addEventListener('input', () => {
 // `dictation` events and replaces what this dictation inserted at the caret.
 
 const MIC_HINT = {
-  connecting: 'Connecting… Esc cancels',
-  mic: 'Starting the microphone… Esc cancels',
-  recording: 'Listening · Alt+S stops · Esc cancels',
-  finishing: 'Finishing the last words…',
+  connecting: (stop) => `Listening (connecting) · ${stop}`,
+  recording: (stop) => `Listening · ${stop}`,
+  finishing: () => 'Finishing the last words…',
 }
+
+// Hold Space in the comment box to dictate, release to stop; a tap types a space. The space is typed when the key
+// comes up, or as soon as another key goes down first, so fast typing keeps its order. Holding Space no longer
+// repeats spaces.
+const HOLD_MS = 300
+let space = null // {timer, held} while Space is down in the comment box
+
+function typeSpace() {
+  // insertText keeps the textarea's own undo history; setRangeText is the fallback.
+  if (!document.execCommand('insertText', false, ' ')) {
+    textEl.setRangeText(' ', textEl.selectionStart, textEl.selectionEnd, 'end')
+    textEl.dispatchEvent(new Event('input'))
+  }
+}
+
+function spaceUp(type = true) {
+  const s = space
+  space = null
+  if (!s) return
+  clearTimeout(s.timer)
+  if (!s.held) {
+    if (type) typeSpace()
+  } else if (state.dict?.ptt) stopDictation()
+}
+document.addEventListener('keyup', (e) => e.key === ' ' && spaceUp())
+window.addEventListener('blur', () => spaceUp(false))
 
 function renderMic() {
   const d = state.dict
   micEl.disabled = !state.connected || (!d && !state.dictation.available)
   micEl.dataset.state = d ? d.phase : 'idle'
   micEl.setAttribute('aria-pressed', d ? 'true' : 'false')
-  micEl.title = d ? 'Stop dictation (Alt+S)' : state.dictation.available ? 'Dictate (Alt+S)' : state.dictation.reason || 'Dictation is unavailable.'
-  hintEl.textContent = d ? MIC_HINT[d.phase] || HINT : HINT
+  micEl.title = d ? 'Stop dictation' : state.dictation.available ? 'Dictate: hold Space in the box, or Alt+S / click to toggle' : state.dictation.reason || 'Dictation is unavailable.'
+  const stop = d?.ptt ? 'release Space to stop' : 'Alt+S stops · Esc cancels'
+  hintEl.textContent = d ? MIC_HINT[d.phase]?.(stop) || HINT : state.dictation.available && state.connected ? `${HINT} · hold Space to dictate` : HINT
   hintEl.classList.toggle('live', !!d)
 }
 
-async function toggleDictation() {
+async function toggleDictation(ptt = false) {
   if (state.dict) return stopDictation()
   if (!state.connected || !state.composer) return
   if (!state.dictation.available) return showError(state.dictation.reason || 'Dictation is unavailable.')
   const v = textEl.value
   const [a, b] = [textEl.selectionStart, textEl.selectionEnd]
-  state.dict = {phase: 'connecting', original: v, before: v.slice(0, a), after: v.slice(b), rendered: v, inserted: false, detached: false}
+  state.dict = {phase: 'connecting', ptt, original: v, before: v.slice(0, a), after: v.slice(b), rendered: v, inserted: false, detached: false}
   $('#composer-error').hidden = true
   renderMic()
   textEl.focus()
