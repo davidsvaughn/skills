@@ -354,7 +354,9 @@ export function render(an) {
       }
       case 'code': {
         const lang = node.lang ? `<span class="lang">${esc(node.lang)}</span>` : ''
-        return blockUnit(node, 'pre', 'code', `${lang}<code>${esc(node.value)}</code>`)
+        // A mermaid block keeps its source; the page draws the diagram inside it (drawDiagrams in web/app.js).
+        const cls = node.lang === 'mermaid' ? 'code mermaid' : 'code'
+        return blockUnit(node, 'pre', cls, `${lang}<code>${esc(node.value)}</code>`)
       }
       case 'html':
         if (parent && (parent.type === 'root' || parent.type === 'blockquote' || parent.type === 'listItem'))

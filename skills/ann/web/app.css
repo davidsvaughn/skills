@@ -139,6 +139,11 @@ button { font: inherit; color: inherit; }
 .doc pre .lang { position: absolute; top: 0.4em; right: 0.7em; font-size: 0.75em; color: var(--muted); user-select: none; }
 .doc pre.frontmatter { color: var(--muted); font-size: 0.8em; border: 1px dashed var(--line); background: none; }
 .doc pre.raw-html { color: var(--muted); font-size: 0.8em; }
+.doc pre.mermaid.drawn { background: none; border: 1px solid var(--line); white-space: normal; text-align: center; }
+.doc pre.mermaid.drawn > code, .doc pre.mermaid.drawn > .lang { display: none; }
+.doc pre.mermaid .diagram { font-family: system-ui, sans-serif; line-height: normal; }
+.doc pre.mermaid .diagram svg { max-width: 100%; height: auto; }
+.doc pre.mermaid .diagram-error { margin-top: 0.75em; color: var(--danger); font-size: 0.8em; white-space: pre-wrap; text-align: left; }
 .doc code.raw-html { color: var(--muted); }
 .doc img { max-width: 100%; }
 .doc .table-wrap { overflow-x: auto; }

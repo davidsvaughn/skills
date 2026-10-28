@@ -103,6 +103,7 @@ function applyDoc(d) {
   $('#title').title = d.file
   docEl.innerHTML = d.html
   for (const img of $$('img', docEl)) img.addEventListener('load', layout, {once: true})
+  drawDiagrams()
   renderCards()
   window.scrollTo(0, y)
   if (prev && prev.version !== d.version && state.composer) composerDocChanged()
@@ -237,6 +238,75 @@ function layout() {
 
 // What part of a rendered element the range covers: null if nothing, else [a, b) as character offsets within
 // the element's own text (for a unit element the whole of it).
+// Mermaid blocks: the library (5 MB) loads on the first document that has one. Each drawing is cached by
+// theme and source, so a reload after an edit redraws only the diagrams that changed and nothing flickers.
+// The block keeps its data-s/data-e, so a selection anywhere in a diagram comments on the whole fence.
+const dark = matchMedia('(prefers-color-scheme: dark)')
+const drawn = new Map()
+let mermaidReady = null
+let diagramSeq = 0
+
+function loadMermaid() {
+  mermaidReady ??= new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'mermaid.min.js'
+    s.onload = () => resolve(window.mermaid)
+    s.onerror = () => reject(new Error('mermaid.min.js did not load'))
+    document.head.append(s)
+  })
+  return mermaidReady
+}
+
+function showDiagram(pre, html, ok = true) {
+  let box = pre.querySelector('.diagram')
+  if (!box) {
+    box = document.createElement('div')
+    box.className = 'diagram'
+    pre.append(box)
+  }
+  box.innerHTML = html
+  pre.classList.toggle('drawn', ok)
+}
+
+async function drawDiagrams() {
+  const pres = $$('pre.mermaid', docEl)
+  if (!pres.length) return
+  const theme = dark.matches ? 'dark' : 'default'
+  const todo = []
+  for (const pre of pres) {
+    const key = `${theme}\n${$('code', pre).textContent}`
+    if (drawn.has(key)) showDiagram(pre, drawn.get(key))
+    else todo.push([pre, key])
+  }
+  if (!todo.length) return layout()
+  let mermaid
+  try {
+    mermaid = await loadMermaid()
+  } catch (e) {
+    mermaidReady = null
+    return toast(e.message)
+  }
+  mermaid.initialize({startOnLoad: false, securityLevel: 'strict', theme})
+  for (const [pre, key] of todo) {
+    const id = `mermaid-${++diagramSeq}`
+    try {
+      const {svg} = await mermaid.render(id, key.slice(theme.length + 1))
+      drawn.set(key, svg)
+      if (pre.isConnected) showDiagram(pre, svg)
+    } catch (e) {
+      // Not cached: a broken diagram is usually mid-edit, and the next save should try again. The source
+      // stays visible above the message. Mermaid can leave its error drawing in <body>; take it out.
+      document.getElementById(`d${id}`)?.remove()
+      const err = document.createElement('div')
+      err.className = 'diagram-error'
+      err.textContent = `Mermaid could not draw this: ${e.message || e}`
+      if (pre.isConnected) showDiagram(pre, err.outerHTML, false)
+    }
+  }
+  layout()
+}
+dark.addEventListener('change', () => drawDiagrams())
+
 function selectedPart(range, node) {
   const r = document.createRange()
   r.selectNodeContents(node)

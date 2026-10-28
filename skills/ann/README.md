@@ -130,6 +130,12 @@ and escaping). Per-offset kind/thread arrays decide how each character renders: 
 `<span class="cm-anchor" data-anchor="ID">` at the first comment of each thread), `<mark class="cm-hl"
 data-t="ID">`, `<ins class="cm-ins">`, `<del class="cm-del">`, substitution old/new. Code blocks are `<pre
 class="code" data-s data-e>` units; a highlight around one wraps it in `<div class="cm-block cm-hl" data-t>`.
+A ```` ```mermaid ```` fence gets `class="code mermaid"`; the page draws it with mermaid
+(`node_modules/mermaid/dist/mermaid.min.js`, served as `mermaid.min.js` and loaded only when a document has
+one), puts the SVG inside the same `<pre>` and hides the source, so a selection anywhere in a diagram comments
+on the whole fence. Drawings are cached by theme and source, so a reload after an edit redraws only changed
+diagrams; a diagram that fails to parse keeps its source visible with mermaid's error under it. Light and dark
+follow `prefers-color-scheme` (mermaid's `default` and `dark` themes), with `securityLevel: 'strict'`.
 Front matter renders as `<pre class="frontmatter">` without offsets (not annotatable). Relative link and image
 targets are rewritten to `files/<path>`, which the server serves from the document's directory, refusing
 anything outside the git work tree (or the file's directory when not in one); `javascript:` and other schemes
@@ -177,7 +183,7 @@ refuses them (they are accepted or rejected in the file). CRLF files keep CRLF.
 
 Node `http`, bound to `127.0.0.1` on a random port, every URL under `/<32 hex token>/`; requests whose `Host` is
 not `127.0.0.1:PORT` or `localhost:PORT` get 403 (DNS rebinding); POST bodies must be JSON. Routes: `GET /`
-(page), `app.js`, `app.css`, `api/doc`, `api/ping`, `api/events` (SSE: `hello`, `doc {version}` on every change,
+(page), `app.js`, `app.css`, `mermaid.min.js`, `api/doc`, `api/ping`, `api/events` (SSE: `hello`, `doc {version}` on every change,
 a comment line every 25 s), `files/<path>`; `POST api/comment|general|reply|edit|delete|resolve|undo`, each
 with `version` = short sha1 of the file content: a mismatch is a 409 with the current doc and changes nothing,
 so an edit never lands on a stale base; a refused edit is a 422 with the message. Writes are atomic (temp file

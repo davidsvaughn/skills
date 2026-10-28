@@ -16,6 +16,7 @@ import {addComment, addGeneral, reply, editComment, deleteComment, resolve, Edit
 import {availability, loadKey, startDictation, DEFAULT_MODEL} from './dictation.mjs'
 
 const WEB = fileURLToPath(new URL('../web/', import.meta.url))
+const MERMAID = fileURLToPath(new URL('../node_modules/mermaid/dist/mermaid.min.js', import.meta.url))
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -222,7 +223,7 @@ export async function serve(opts) {
     })
   }
 
-  function serveStatic(res, abs, name) {
+  function serveStatic(res, abs, name, cache = 'no-store') {
     let st
     try {
       st = fs.statSync(abs)
@@ -231,7 +232,7 @@ export async function serve(opts) {
     }
     if (!st.isFile()) return send(res, 404, 'not found')
     const type = MIME[path.extname(name).toLowerCase()] || 'application/octet-stream'
-    res.writeHead(200, {'Content-Type': type, 'Content-Length': st.size, 'Cache-Control': 'no-store'})
+    res.writeHead(200, {'Content-Type': type, 'Content-Length': st.size, 'Cache-Control': cache})
     fs.createReadStream(abs).pipe(res)
   }
 
@@ -369,6 +370,7 @@ export async function serve(opts) {
       if (req.method === 'GET' || req.method === 'HEAD') {
         if (rel === '') return serveStatic(res, path.join(WEB, 'index.html'), 'index.html')
         if (rel === 'app.js' || rel === 'app.css') return serveStatic(res, path.join(WEB, rel), rel)
+        if (rel === 'mermaid.min.js') return serveStatic(res, MERMAID, rel, 'max-age=86400')
         if (rel === 'api/doc') return json(res, 200, doc())
         if (rel === 'api/ping') return json(res, 200, {ok: true, file, version, tabs: clients.size, pid: process.pid})
         if (rel === 'api/events') return events(req, res)
