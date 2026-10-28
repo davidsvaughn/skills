@@ -50,6 +50,7 @@ Kinds seen on 2026-09-23, with what the converter does:
   The fragments carried `sources_footnote` references with no sources in them, and the merged message carried none, so nothing was lost by skipping them.
 - The same answer was written in ChatGPT's "genui" markup: layout tags such as `<text color="secondary" size="xs">`, `<box gap={3}>` and `<row align=start gap={3}>` inline in the markdown (seen 2026-10-15).
   The converter keeps them verbatim; a markdown viewer that drops unknown tags still shows the text inside them.
+- A `<badge color="success">` layout tag (a coloured label above a heading) also appears in that markup (seen 2026-10-28, share `6ae218de-...`, model `gpt-6-thinking`); the converter kept it verbatim like the other layout tags, with no note raised.
 
 ### Citations
 
