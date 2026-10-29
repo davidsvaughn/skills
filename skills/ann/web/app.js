@@ -191,8 +191,17 @@ function anchorOf(id) {
   return $(`mark[data-t="${id}"], ins[data-t="${id}"], del[data-t="${id}"], .cm-block[data-t="${id}"], [data-anchor="${id}"]`, docEl)
 }
 
+// The comment box grows with its text, typed or dictated, so the whole comment is always in view. layout()
+// calls it first, which covers every change of text or width (input, dictation, opening, resize).
+function fitText() {
+  if (composerEl.hidden) return
+  textEl.style.height = 'auto'
+  textEl.style.height = `${textEl.scrollHeight + textEl.offsetHeight - textEl.clientHeight}px`
+}
+
 // Cards sit beside their anchors, pushed down so they never overlap; unplaced threads first, at the top.
 function layout() {
+  fitText()
   const items = []
   const mtop = marginEl.getBoundingClientRect().top
   const yOf = (node) => (node ? node.getBoundingClientRect().top - mtop : 0)
@@ -681,6 +690,9 @@ function onDictation(e) {
       const caret = (d.before + sep1 + e.text).length
       textEl.setSelectionRange(caret, caret)
       layout()
+      // Typing scrolls to the caret by itself; text set from code does not, so keep the box's end in view.
+      const below = textEl.getBoundingClientRect().bottom + 16 - window.innerHeight
+      if (below > 0) window.scrollBy(0, below)
     }
     d.rendered = v
     d.inserted = true

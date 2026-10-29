@@ -227,7 +227,8 @@ ins.cm-ins.hot, del.cm-del.hot { outline: 2px solid var(--card-hot); outline-off
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
   min-height: 3.6em;
 }
 .composer textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }

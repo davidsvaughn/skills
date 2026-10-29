@@ -44,7 +44,8 @@ node ~/.claude/skills/ann/scripts/ann.mjs stop docs/foo.md
 ```
 
 In the page: select text, press the floating Comment button (or Ctrl+Shift+M, the extension's key), type,
-Enter. Shift+Enter is a newline, Escape cancels an empty composer. Cards sit in the right margin beside their
+Enter. Shift+Enter is a newline, Escape cancels an empty composer. The comment box grows with its text, typed or
+dictated, new or being edited, so the whole comment stays in view. Cards sit in the right margin beside their
 highlights; hover links card and highlight; each comment has Edit and Delete, each thread Reply and Resolve.
 "Comment on whole doc" puts a point comment above the first block. Undo (button or Ctrl+Z outside a text
 field) reverts the last edit made from this page. Below 1000 px the cards are listed after the document. The
