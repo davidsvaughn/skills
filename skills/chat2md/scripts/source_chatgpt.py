@@ -221,16 +221,22 @@ def genui_refs(text: str, meta: dict, counters: dict) -> list[dict]:
     with the message's `content_references`, so the offsets of both stay valid.
     """
     titles = {}
+    by_ref = {}  # "turn<n><search|view><k>" -> search result, from each entry's `ref_id`
     for group in meta.get("search_result_groups") or []:
         for entry in (group or {}).get("entries") or []:
             if isinstance(entry, dict) and entry.get("url") and entry.get("title"):
                 titles.setdefault(entry["url"], entry["title"])
+            rid = entry.get("ref_id") if isinstance(entry, dict) else None
+            if isinstance(rid, dict) and entry.get("url"):
+                by_ref.setdefault(f"turn{rid.get('turn_index')}{rid.get('ref_type')}{rid.get('ref_index')}", entry)
     refs = []
+    covered = []
     for comp in meta.get("genui_components") or []:
         start, end = comp.get("start_index"), comp.get("end_index")
         if not (isinstance(start, int) and isinstance(end, int)):
             continue
         kind = comp.get("type")
+        covered.append((start, end))
         if kind == "cite":
             items = [{"url": u["url"], "title": titles.get(u["url"], urllib.parse.urlsplit(u["url"]).netloc)}
                      for u in comp.get("safe_urls") or []
@@ -279,6 +285,22 @@ def genui_refs(text: str, meta: dict, counters: dict) -> list[dict]:
                          "url": pages[0] if pages else ""})
             counters["genui_images"] = counters.get("genui_images", 0) + 1
             continue
+        elif kind == "code_block":
+            # `<CodeBlock language="sql" editable>...</CodeBlock>` (seen 2026-10-29): a code block the
+            # page renders as an editor; the entry carries only its span, so the language and the code
+            # are read from the tag and written as an ordinary fenced block.
+            m = re.fullmatch(r'<CodeBlock\b([^>]*)>\n?(.*?)\n?</CodeBlock>', text[start:end], re.S)
+            if not m:
+                counters.setdefault("genui_unknown", []).append(kind)
+                continue
+            lang = re.search(r'language="([^"]*)"', m.group(1))
+            runs = [len(r) for r in re.findall(r"`{3,}", m.group(2))]
+            fence = "`" * max([3] + [n + 1 for n in runs])
+            refs.append({"type": "genui_code_block", "matched_text": text[start:end], "start_idx": start,
+                         "end_idx": end, "items": [],
+                         "value": f"{fence}{lang.group(1) if lang else ''}\n{m.group(2)}\n{fence}"})
+            counters["genui_code_blocks"] = counters.get("genui_code_blocks", 0) + 1
+            continue
         elif kind != "memory_cite":
             counters.setdefault("genui_unknown", []).append(kind)
             continue
@@ -286,6 +308,22 @@ def genui_refs(text: str, meta: dict, counters: dict) -> list[dict]:
             items = []
         refs.append({"type": f"genui_{kind}", "matched_text": text[start:end],
                      "start_idx": start, "end_idx": end, "items": items})
+
+    # A `<Cite/>` tag can be missing from `genui_components` (seen 2026-10-29: 2 of 10 in a merged
+    # message). Its ref names a search result by turn, type and index, which the result's `ref_id`
+    # in `search_result_groups` also carries, so the link is recovered from there.
+    for m in re.finditer(r"<Cite\b[^>]*/>", text):
+        if any(s <= m.start() < e for s, e in covered):
+            continue
+        names = re.findall(r'"(turn\d+[a-z]+\d+)"', m.group(0))
+        found = [by_ref[n] for n in names if n in by_ref]
+        if not found:
+            counters["genui_cites_unresolved"] = counters.get("genui_cites_unresolved", 0) + 1
+            continue
+        items = [{"url": e["url"], "title": e.get("title") or e["url"]} for e in found]
+        refs.append({"type": "genui_cite", "matched_text": m.group(0), "start_idx": m.start(),
+                     "end_idx": m.end(), "items": items})
+        counters["genui_cites_by_ref"] = counters.get("genui_cites_by_ref", 0) + 1
     return refs
 
 
@@ -337,7 +375,7 @@ def apply_citations(text: str, refs: list, counters: dict) -> str:
     for start, end, ref, links in sorted(spans, key=lambda s: -s[0]):
         if ref.get("type") == "genui_memory_cite":
             rendered = "*[memory citation]*"
-        elif ref.get("type") == "genui_entity":
+        elif ref.get("type") in ("genui_entity", "genui_code_block"):
             rendered = ref.get("value") or ""
         elif ref.get("type") == "genui_link":
             rendered = f"[{ref['value'].replace(']', ')')}]({ref['url']})"
@@ -469,6 +507,13 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
         notes.append(f"{counters['genui_images']} genui image(s) written as an image note with the search query")
     if counters.get("widgets_in_text"):
         notes.append(f"{counters['widgets_in_text']} rendered code block(s) left as written in the text")
+    if counters.get("genui_code_blocks"):
+        notes.append(f"{counters['genui_code_blocks']} genui code block(s) written as fenced code")
+    if counters.get("genui_cites_by_ref"):
+        notes.append(f"{counters['genui_cites_by_ref']} genui citation(s) missing from genui_components, "
+                     "linked from search_result_groups by ref")
+    if counters.get("genui_cites_unresolved"):
+        notes.append(f"{counters['genui_cites_unresolved']} genui citation tag(s) with no source in the share, left as written")
     if counters.get("genui_unknown"):
         kinds = ", ".join(sorted(set(map(str, counters["genui_unknown"]))))
         notes.append(f"{len(counters['genui_unknown'])} genui component(s) of unknown type left as written ({kinds})")
