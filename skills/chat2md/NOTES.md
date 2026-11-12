@@ -40,6 +40,9 @@ Evidence: share `6af54e47-...` (created 2026-11-12), and the earlier shares `6ae
   Text or `.map` data the program shows but the markdown lacks is written in place under a `*[shown on the page, not in ChatGPT's markdown copy:]*` line, the data as a fenced block of the program's own array.
   On the three shares it placed every component the code holds (counted by grep of the code: 21 links, 22 citations, 1 memory citation, 2 images on `6af54e47-...`), and on the two earlier shares the set of link URLs equals the one their old-format transcripts got from the old offsets.
 - `source.references` types seen: `client_defined_widget` (a code block, already in `content`), `hidden` (a list of `safe_urls`), `followup_a` (the suggested follow-ups, whose text is in `content`), `sources_footnote` (with empty `sources` on both shares that had one).
+- A user message can carry `renderFormat: "markdown"` (seen 2026-11-12, share `6af55c80-...`, on a long message with pasted headings); the other user messages had no such field.
+- Suggested follow-ups are kept on the last answer only: once the conversation continues, the earlier answer's `content` loses its closing follow-up lines and its `followup_a` references (seen 2026-11-12: share `6af54e47-...` re-shared as `6af55c80-...` after one more turn; the earlier answer's text was otherwise identical).
+  A transcript made from the later share is therefore missing those lines; the earlier share's transcript still has them.
 - Two user messages can follow each other with no answer between them (seen on `6af54e47-...`); the page shows the same, and the transcript now says `*[no reply to this message in the share]*`.
 
 ### Payload (until November 2026)

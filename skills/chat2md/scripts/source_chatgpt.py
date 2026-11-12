@@ -504,7 +504,10 @@ def build_blocks(conv: dict, counters: dict) -> list[dict]:
     return blocks
 
 
-OCTANE_KEYS = {"id", "role", "content", "reasoningSummary", "source", "approvedUrls", "renderedHtml"}
+# `renderFormat` "markdown" marks a user message the page renders as markdown (seen 2026-11-12); its
+# `content` is written as is either way.
+OCTANE_KEYS = {"id", "role", "content", "reasoningSummary", "source", "approvedUrls", "renderedHtml",
+               "renderFormat"}
 
 
 def build_octane_blocks(conv: dict, counters: dict) -> list[dict]:
