@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import chatgpt_dil
 from chat2md_common import UA, log
 
 NAME = "ChatGPT"
@@ -143,8 +144,32 @@ def find_conversation(obj) -> dict | None:
     return None
 
 
+def octane_conversation(html: str) -> dict | None:
+    """The conversation of an "octane" share page (seen 2026-11-12), or None for another format.
+
+    The page's `__WEB_MOBILE_DATA__` script holds `conversation`: `title`, `sharedContent` and a flat
+    `messages` list in display order, each with `role` and `content` (markdown), and for an answer
+    `reasoningSummary` and `source.dil`, the genui program the page renders (see chatgpt_dil.py).
+    """
+    m = re.search(r'<script[^>]+id="__WEB_MOBILE_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return None
+    try:
+        conv = (json.loads(m.group(1)) or {}).get("conversation")
+    except json.JSONDecodeError as e:
+        log(f"__WEB_MOBILE_DATA__ did not decode ({e}); trying other formats")
+        return None
+    if isinstance(conv, dict) and isinstance(conv.get("messages"), list):
+        log("payload: octane __WEB_MOBILE_DATA__")
+        return conv
+    return None
+
+
 def extract_conversation(html: str) -> dict:
     """Try the formats ChatGPT has used for share pages, newest first."""
+    conv = octane_conversation(html)
+    if conv:
+        return conv
     chunks = _js_strings_after(html, "streamController.enqueue(")
     if chunks:
         try:
@@ -171,7 +196,8 @@ def extract_conversation(html: str) -> dict:
     raise SystemExit(
         "No conversation found in the page. Either the link is not a public share link "
         "(a chatgpt.com/c/... URL is private and only loads for its owner), or ChatGPT changed the "
-        "page format - keep the page with --save-raw and look for 'linear_conversation'."
+        "page format - keep the page with --save-raw and look for '__WEB_MOBILE_DATA__' (the "
+        "2026-11 format) or 'linear_conversation' (the earlier one)."
     )
 
 
@@ -478,6 +504,61 @@ def build_blocks(conv: dict, counters: dict) -> list[dict]:
     return blocks
 
 
+OCTANE_KEYS = {"id", "role", "content", "reasoningSummary", "source", "approvedUrls", "renderedHtml"}
+
+
+def build_octane_blocks(conv: dict, counters: dict) -> list[dict]:
+    """Blocks for an octane page: the messages are already flat and in display order.
+
+    An answer's `content` is ChatGPT's markdown copy of its genui program, without the program's
+    inline components; chatgpt_dil splices them back and supplies the copy's own text, cut at each
+    insertion, for the verbatim check.
+    """
+    blocks: list[dict] = []
+    created = (conv.get("sharedContent") or {}).get("originalCreatedAt")
+    for m in conv["messages"]:
+        role = m.get("role")
+        text = m.get("content") or ""
+        extra = sorted(set(m) - OCTANE_KEYS)
+        if extra:
+            counters.setdefault("octane_unknown_fields", []).extend(extra)
+        verbatim: list[str] = []
+        if role == "assistant":
+            if m.get("reasoningSummary"):
+                blocks.append({"kind": "act", "text": m["reasoningSummary"]})
+            source = m.get("source") or {}
+            dil = source.get("dil") or {}
+            tree = chatgpt_dil.parse(dil.get("code") or "", dil.get("constants") or {}) if dil else None
+            if tree:
+                results = ((dil.get("appData") or {}).get("opGenui") or {}).get("componentResults") or {}
+                text, verbatim, missing = chatgpt_dil.splice(text, tree, dil.get("constants") or {},
+                                                            results, counters)
+                counters["dil_messages"] = counters.get("dil_messages", 0) + 1
+            elif dil:
+                counters["dil_unparsed"] = counters.get("dil_unparsed", 0) + 1
+            footnote = []
+            for ref in source.get("references") or []:
+                kind = ref.get("type")
+                if kind == "sources_footnote":
+                    # the page's source list under the answer; empty in every share seen so far
+                    footnote += _ref_links(ref.get("data") or {})
+                    continue
+                # a code block already in the text, the page's source list, the follow-up prompts
+                # (their `matched_text` is the answer's own closing bullets): nothing to splice
+                if kind not in ("client_defined_widget", "hidden", "followup_a"):
+                    counters.setdefault("octane_unknown_refs", []).append(str(kind))
+            if footnote:
+                text = text.rstrip() + "\n\nSources: " + ", ".join(f"[{lab}]({url})" for lab, url in footnote)
+        if role in ("user", "assistant") and text.strip():
+            stamp = created if not blocks else None
+            blocks.append({"kind": role, "text": text.strip(), "verbatim": verbatim, "attachments": [],
+                           "time": dt.datetime.fromtimestamp(stamp / 1000, dt.timezone.utc)
+                           if isinstance(stamp, (int, float)) else None})
+        elif role not in ("user", "assistant"):
+            counters.setdefault("octane_unknown_roles", []).append(str(role))
+    return blocks
+
+
 # -------------------------------------------------------------------------------- entry
 
 def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dict], object, list[str]]:
@@ -487,7 +568,8 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
         open(raw_out, "w", encoding="utf-8").write(html)
     conv = extract_conversation(html)
     counters: dict = {}
-    blocks = build_blocks(conv, counters)
+    octane = "linear_conversation" not in conv and "mapping" not in conv
+    blocks = build_octane_blocks(conv, counters) if octane else build_blocks(conv, counters)
     info = {"title": conv.get("title"), "model": conv.get("default_model_slug"),
             "url": source if is_url else page_url(html)}
     notes = []
@@ -517,6 +599,30 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
     if counters.get("genui_unknown"):
         kinds = ", ".join(sorted(set(map(str, counters["genui_unknown"]))))
         notes.append(f"{len(counters['genui_unknown'])} genui component(s) of unknown type left as written ({kinds})")
+    if counters.get("dil_messages"):
+        parts = [f"{counters[k]} {label}" for k, label in [
+            ("dil_links", "link(s)"), ("dil_cites", "citation(s)"), ("dil_memory_cites", "memory citation(s)"),
+            ("dil_images", "image note(s)")] if counters.get(k)]
+        notes.append(f"{counters['dil_messages']} dil-v2 answer(s): spliced into ChatGPT's markdown copy "
+                     + (", ".join(parts) or "no components"))
+    if counters.get("dil_cites_unresolved"):
+        notes.append(f"{counters['dil_cites_unresolved']} dil citation(s) with no resolved source, written by ref id")
+    if counters.get("dil_at_end"):
+        notes.append(f"{counters['dil_at_end']} dil component(s) with no text after them, put at the end of their message")
+    if counters.get("dil_page_only") or counters.get("dil_data_blocks"):
+        notes.append(f"{counters.get('dil_page_only', 0)} text(s) and {counters.get('dil_data_blocks', 0)} data "
+                     "block(s) the page shows but the markdown copy lacks, written in place under a marker - "
+                     "read them")
+    if counters.get("dil_unparsed"):
+        notes.append(f"{counters['dil_unparsed']} dil program(s) not parsed: only the markdown copy is in the "
+                     "file, WITHOUT its links and citations")
+    if counters.get("dil_unknown"):
+        kinds = ", ".join(sorted(set(counters["dil_unknown"])))
+        notes.append(f"{len(counters['dil_unknown'])} dil component(s) of unknown type NOT in the file ({kinds})")
+    for key, what in [("octane_unknown_fields", "message field"), ("octane_unknown_refs", "reference type"),
+                      ("octane_unknown_roles", "message role")]:
+        if counters.get(key):
+            notes.append(f"unknown octane {what}(s), not rendered: {', '.join(sorted(set(counters[key])))}")
     if counters.get("non_text_parts"):
         kinds = ", ".join(sorted(set(counters["non_text_parts"])))
         notes.append(f"{len(counters['non_text_parts'])} non-text part(s) kept as placeholders ({kinds})")

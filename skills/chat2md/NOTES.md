@@ -18,7 +18,31 @@ Evidence: the original script (written by 2026-09-18, its evidence not recorded)
 - A saved page names its share link in `<link rel="canonical">` (seen 2026-09-23).
   Do not use `og:url` for this: the same page has two of them, the share link and plain `https://chatgpt.com/`.
 
-### Payload
+### The "octane" page (since November 2026)
+
+Evidence: share `6af54e47-...` (created 2026-11-12), and the earlier shares `6ae218de-...` and `6ae4edcb-...` re-fetched on 2026-11-12, all fetched with urllib; the page markup calls itself "octane".
+
+- By 2026-11-12 every share link serves this page, the old shares included; there is no `streamController.enqueue(...)` payload any more, so the sections below describe what the page used to be.
+  Until 2026-11-12 the converter answered "No conversation found" on it.
+  The old format can no longer be fetched for a regression check: re-fetching a share on record gives the new page.
+- The conversation is in `<script id="__WEB_MOBILE_DATA__" type="application/json">`, plain JSON, under `conversation`: `title`, `sharedContent` (`originalCreatedAt` in milliseconds, `lastMessageId`, og fields) and `messages`, a flat list in display order.
+  Copies of the same messages sit in `octane-conversation-transcript` (user text only, assistant text empty) and in the `application-composer` scope's `serialized-conversation-state` inside the `data-octane-native-signals` scripts (text, no sources); neither is needed.
+- A message is `{id, role, content}`; an answer adds `reasoningSummary` (a "Worked for ..." line, absent on some answers), `approvedUrls`, `renderedHtml` (empty) and `source`.
+- Not published any more, compared with the same shares' earlier transcripts: thinking summaries, search queries, per-message times and the model slug.
+  `originalCreatedAt` is assumed to be when the conversation started; it matched the first message's time in the earlier transcript of `6ae218de-...`, to the minute.
+- `content` is a markdown copy of the answer that ChatGPT made from its genui program; it equals `source.dil.fallbackMarkdown` on every answer seen.
+  It has every inline component stripped: a `Link` leaves nothing (a card's line of two links separated by " · " became the bare " · "), a `Cite`, `MemoryCite` or `AsyncImage` vanishes.
+  It also leaves out content drawn with `.map` over inline data (a scored bar chart, a grid of cards), and it backslash-escapes punctuation (`\!`, `\:`, `\.`, `1\.`).
+- `source.dil` is the program: `renderer` `dil-v2`, `code` (compiled JSX: `__dil.jsx(tag, props, ...children)`, text as `__dilConstants["<n>"]`, wrapped in `__dilSafe(()=>(...),null)`), `constants`, `appData.opGenui.componentResults` (each component's resolved state, keyed by the `__resolutionId` in its props), `requiredComponents`, `clientDefinedWidgets`, `fallbackMarkdown`, `viewState`.
+  Components seen: `Link` (state `url`, `title`), `Cite` (state `items`, each with `url`, `title`, `ref_id`, `thumbnail_url`), `MemoryCite` (empty state), `AsyncImage` (props `query`; state `images`, the first a web page, with images.openai.com copies).
+  Lowercase tags are layout (`text`, `bold`, `code`, `title`, `box`, `row`, `col`, `grid`, `grid-item`, `list`, `list-item`, `table`, `icon`, `badge`, `divider`, `pressable`, `math`, `blockquote`, `__chatgptClientDefinedWidget`).
+- `chatgpt_dil.py` keeps `content` as the body and splices the components back in, placing each by the program text around it, found in the markdown in document order.
+  Text or `.map` data the program shows but the markdown lacks is written in place under a `*[shown on the page, not in ChatGPT's markdown copy:]*` line, the data as a fenced block of the program's own array.
+  On the three shares it placed every component the code holds (counted by grep of the code: 21 links, 22 citations, 1 memory citation, 2 images on `6af54e47-...`), and on the two earlier shares the set of link URLs equals the one their old-format transcripts got from the old offsets.
+- `source.references` types seen: `client_defined_widget` (a code block, already in `content`), `hidden` (a list of `safe_urls`), `followup_a` (the suggested follow-ups, whose text is in `content`), `sources_footnote` (with empty `sources` on both shares that had one).
+- Two user messages can follow each other with no answer between them (seen on `6af54e47-...`); the page shows the same, and the transcript now says `*[no reply to this message in the share]*`.
+
+### Payload (until November 2026)
 
 - The conversation is in a React Router stream payload: string literals passed to `streamController.enqueue(...)`, 2 of them on 2026-09-23.
   Joined and parsed, they form a flat pool of values; an object's keys look like `"_<n>"` and point at pool indices, as do its integer values, and negative integers stand for undefined or null.
@@ -85,6 +109,7 @@ Kinds seen on 2026-09-23, with what the converter does:
   Each has a `genui_components` entry of `type` `async_image` with the tag's span, `genui_attributes` (`aspectRatio`, `maxWidth`) and `safe_urls`: first a web page, then several images.openai.com copies.
   The first url is assumed, not confirmed against the page, to be where the picture came from; it matched the subject both times.
   Now `genui_refs` renders each as `*[image: <query> from [<host>](<first url>)]*`, leaving out the thumbnails.
+- From the code's comments only, committed 2026-11-12 from an uncommitted working tree, its share id not recorded (2026-10-29): a `genui_components` entry of `type` `code_block` covers a `<CodeBlock language="..." editable>...</CodeBlock>` tag, written as fenced code; and 2 of 10 `<Cite/>` tags in a merged message had no `genui_components` entry, their links recovered from `search_result_groups` by `ref_id`.
 - The same answer drew a diagram as genui layout markup with Svelte-style loops inside an `<svg>`: `<box border radius="xl" padding={3} gap={2}>`, `{#each [55,170,285] as x}` ... `{/each}`, attributes such as `d={`M170 45 L${x} 96`}`, and a `<caption>` (seen 2026-10-20, share `6ad78688-...`).
   It is plain text in `content.parts` with no `genui_components` entry, and the converter keeps it verbatim; a markdown viewer shows it as raw markup, so the diagram is readable only in the source.
 - A fenced code block can come with a `content_references` entry of `type` `client_defined_widget`, `category` `code_block`, whose `data` repeats the block's `content` and `language` and whose `matched_text` is the whole fenced block (seen 2026-10-20, share `6ad78688-...`).

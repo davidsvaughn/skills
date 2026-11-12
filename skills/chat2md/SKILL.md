@@ -23,7 +23,8 @@ Fetching the page and reading it is not enough on either site, and the obvious s
 The evidence for everything below, with dates and the dead ends, is in `NOTES.md`.
 
 - **ChatGPT** (`source_chatgpt.py`): the JSON endpoints answer 403 to anything but a browser, so do not spend turns on them.
-  The share page fetches fine, but the conversation sits in an encoded React Router payload inside it, which the script decodes.
+  The share page fetches fine; since November 2026 it carries the conversation as JSON in a `__WEB_MOBILE_DATA__` script (before that, an encoded React Router payload, which the script still decodes).
+  Each answer comes as a markdown copy with every link and citation stripped, plus the compiled UI program the page renders; `chatgpt_dil.py` puts the links, citations and image notes back into the markdown from that program.
 - **Claude** (`source_claude.py`): the share page is an empty app shell, so a saved claude.ai page is useless.
   The conversation comes as JSON from claude.ai's snapshot API, which is behind a Cloudflare bot check.
   The script tries a plain request first, and when Cloudflare refuses it, opens a short-lived visible `playwright-cli` browser (session `chat2md-<first 8 characters of the Claude Code session id, or of the process id elsewhere>`, override with `--browser-session`), keeps the snapshot the page requests, and closes the window; that takes a few seconds.
@@ -78,8 +79,10 @@ No, not in the general sense you're asking about. ([Claude](https://code.claude.
 
 What each site publishes differs, and the notes follow it:
 
-- **ChatGPT**: searches with their actual queries, the commands it ran, thinking summaries and "Worked for 32s" lines.
+- **ChatGPT**: the "Worked for 32s" lines, and on pages from before November 2026 also searches with their actual queries, the commands it ran and thinking summaries; the current page no longer publishes those, nor the model or message times.
   A ChatGPT share does not publish tool results, so they are not in the file.
+  Content the page draws that ChatGPT's own markdown copy leaves out (a chart or card grid drawn from inline data, text with no counterpart) is written in place under `*[shown on the page, not in ChatGPT's markdown copy:]*`, data as the program's own array in a code block.
+  A user message the share shows with no answer after it gets `*[no reply to this message in the share]*`.
   A message's trailing source list becomes a `Sources:` line.
 - **Claude**: each web search with its query, then a line with every result as a link.
   A citation link goes where claude.ai shows its chip: at the end of the cited paragraph, or in a `Sources:` paragraph of its own after a table or code block.
@@ -89,7 +92,7 @@ What each site publishes differs, and the notes follow it:
 ## Reporting back
 
 The script prints, to stderr, the title, the message counts, the character counts, any notes, and a line confirming that every message survived into the file; it exits non-zero if one did not.
-For claude.ai messages that carry citations, the check is made against Claude's original text cut at each inserted link, not only against the rendered text.
+For claude.ai messages that carry citations, and for ChatGPT answers whose links were spliced back in, the check is made against the site's original text cut at each inserted link, not only against the rendered text.
 Pass those numbers on to the user - they are the evidence that nothing was lost, which matters here because a transcript that quietly drops a turn looks exactly like a good one.
 Never shorten or summarize a message to tidy the file; verbatim is the whole point.
 
@@ -97,6 +100,9 @@ Notes worth passing on when they appear:
 
 - **"user attachment(s) are hidden by the share itself"** (claude.ai): the share leaves out the file, and the page shows "Files hidden when shared" in its place.
   The transcript marks the spot with `*[attached: 1 file, hidden when shared]*`, but the content cannot be recovered from the link; only the person who shared it has it.
+- **"... dil-v2 answer(s): spliced into ChatGPT's markdown copy ..."** (ChatGPT): how many links and citations were put back; a short count against a source-heavy answer is worth a look.
+- **"... the page shows but the markdown copy lacks, written in place under a marker - read them"** (ChatGPT): read those blocks before handing the file over, since they are reconstructed from the page's program, not from ChatGPT's text.
+- **"dil program(s) not parsed"** or **"dil component(s) of unknown type NOT in the file"** (ChatGPT): links or citations are missing from the file; extend `chatgpt_dil.py` from the page kept with `--save-raw`.
 - **"rendered by the generic path"** (claude.ai): so far only text, citations, web searches and hidden attachments have been checked against a real share.
   Thinking, artifacts, file creation, code execution, web fetches and anything else go through a generic renderer that writes out all of their content.
   Read those parts of the file before handing it over.
@@ -109,7 +115,7 @@ Notes worth passing on when they appear:
   Ask the user to open the link and save the page (Ctrl+S, "Web Page, HTML only"), then pass the saved file instead of the link.
   The `playwright-skill` browser can also save it.
 - **ChatGPT, "No conversation found"**: usually a private `chatgpt.com/c/...` URL, which only loads for its owner; ask for a share link (Share -> Create link).
-  If it really is a share link, keep the page with `--save-raw` and look for `linear_conversation` or `mapping` inside it; the format has moved before and the extractor is a small function to extend.
+  If it really is a share link, keep the page with `--save-raw` and look for `__WEB_MOBILE_DATA__` (the November 2026 page), `linear_conversation` or `mapping` inside it; the format has moved before (`NOTES.md` has each one) and the extractor is a small function to extend.
 - **claude.ai, no browser or the browser fetch fails**: open `https://claude.ai/api/chat_snapshots/<uuid>?rendering_mode=messages&render_all_tools=true` in a browser (a normal window passes the check), save the JSON it shows, and pass that file.
   If the window shows a Cloudflare checkbox, the user can click it while the script waits; `--browser-timeout` gives them longer.
 - **claude.ai, HTTP 404**: the share was unshared or deleted.
@@ -151,6 +157,7 @@ If a new finding changes how the skill should be run, update `SKILL.md` as well.
 
 - `scripts/chat2md.py`: the entry point; picks the source, renders, checks, reports.
 - `scripts/source_chatgpt.py`, `scripts/source_claude.py`: one module per site, each turning its share into the same list of blocks.
+- `scripts/chatgpt_dil.py`: reads a ChatGPT answer's compiled UI program (`dil-v2`) and splices its links and citations into the answer's markdown copy.
 - `scripts/chat2md_common.py`: the small helpers they share.
 - `NOTES.md`: what is known about each site's shares, with evidence and dates; read and extend it as described above.
 - `TODO.md`: code work still owed.

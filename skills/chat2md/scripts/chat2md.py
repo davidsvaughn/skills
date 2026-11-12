@@ -100,12 +100,16 @@ def render(platform: str, info: dict, blocks: list[dict], style: str, header: bo
         return lines
 
     first_turn = True
+    awaiting = False                     # a user message was written and no answer has followed
     for b in blocks:
         if b["kind"] == "act":
             pending.append(b)
             continue
         flush()
         if b["kind"] == "user":
+            if awaiting:
+                out += ["*[no reply to this message in the share]*", ""]
+            awaiting = True
             if not first_turn:
                 out += ["---", ""]
             first_turn = False
@@ -114,6 +118,7 @@ def render(platform: str, info: dict, blocks: list[dict], style: str, header: bo
             else:
                 out += ["## User", "", b["text"], ""] + attachments(b) + ["## Assistant", ""]
         else:
+            awaiting = False
             out += [b["text"], ""]
     flush()
     return "\n".join(out).rstrip() + "\n"
