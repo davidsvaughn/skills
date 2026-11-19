@@ -215,8 +215,14 @@ function layout() {
     const cm = state.composer
     let y = 0
     let after = null
-    if (cm.mode === 'new' && cm.rect) y = Math.max(0, cm.rect.top - mtop)
-    else if (cm.mode === 'reply' || cm.mode === 'edit') after = items.find((i) => i.id === String(cm.threadId))
+    if (cm.mode === 'new') {
+      // Measure the selection now, in the same frame as mtop, so the offset does not depend on scrolling. A
+      // viewport rect kept from selection time moved the box by the scroll distance on every keystroke, and
+      // the browser's scroll-to-caret then made it worse. A re-render removes the selected nodes and the range
+      // collapses onto #doc (still connected, at the top), so test the original node and keep the last position.
+      if (!cm.stale && cm.node?.isConnected) cm.y = Math.max(0, cm.range.getBoundingClientRect().top - mtop)
+      y = cm.y ?? 0
+    } else if (cm.mode === 'reply' || cm.mode === 'edit') after = items.find((i) => i.id === String(cm.threadId))
     items.push({el: composerEl, y: after ? after.y : y, order: after ? after.order + 0.5 : -0.5, composer: true})
   }
   if (narrow.matches) {
@@ -377,7 +383,7 @@ function onSelection() {
   if (!off) return hideFab()
   const rects = range.getClientRects()
   const last = rects[rects.length - 1] || range.getBoundingClientRect()
-  state.pending = {...off, quote: sel.toString().trim(), range: range.cloneRange(), rect: range.getBoundingClientRect()}
+  state.pending = {...off, quote: sel.toString().trim(), range: range.cloneRange()}
   fabEl.hidden = false
   const w = fabEl.offsetWidth
   fabEl.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, last.right + window.scrollX + 6))}px`
@@ -408,7 +414,7 @@ function openComposer(mode, target = {}) {
   if (state.composer) state.drafts.set(state.composer.key, textEl.value)
   const key = draftKey(mode, target)
   const cm = {mode, key, stale: false}
-  if (mode === 'new') Object.assign(cm, {start: target.start, end: target.end, quote: target.quote, rect: target.rect, range: target.range})
+  if (mode === 'new') Object.assign(cm, {start: target.start, end: target.end, quote: target.quote, range: target.range, node: target.range.startContainer})
   if (mode === 'reply' || mode === 'edit') Object.assign(cm, {threadId: target.thread.id, thread: target.thread.start, threadRef: threadRef(target.thread)})
   if (mode === 'edit') Object.assign(cm, {comment: target.comment.start, original: target.comment.text})
   state.composer = cm
