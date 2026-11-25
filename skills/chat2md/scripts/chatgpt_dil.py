@@ -177,13 +177,100 @@ class Parser:
         return node, j
 
 
+COND_NULL = re.compile(r'__dilConstants\["(\d+)"\]\s*(==|!=)=?\s*null')
+COND_TYPE = re.compile(r'__dilConstants\["(\d+)"\]\.type\s*(==|!=)=?\s*"((?:[^"\\]|\\.)*)"')
+
+
+def top_level(p: Parser, i: int, end: int, chars: str) -> int:
+    """Index of the first of `chars` at bracket depth 0 in src[i:end], or -1.
+
+    A `?` that is part of `?.` or `??` is not a ternary and is skipped.
+    """
+    depth, j, src = 0, i, p.src
+    while j < end:
+        c = src[j]
+        if c in "\"'`":
+            j = p.string_end(j)
+            continue
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif depth == 0 and c in chars:
+            if c == "?" and (src[j + 1:j + 2] in (".", "?") or src[j - 1:j] == "?"):
+                j += 2 if src[j + 1:j + 2] in (".", "?") else 1
+                continue
+            return j
+        j += 1
+    return -1
+
+
+def condition(text: str, constants: dict) -> bool | None:
+    """The value of a branch condition the generator emits, or None for one this does not know."""
+    text = text.strip()
+    m = COND_NULL.fullmatch(text)
+    if m:
+        is_null = constants.get(m.group(1)) is None
+        return is_null if m.group(2) == "==" else not is_null
+    m = COND_TYPE.fullmatch(text)
+    if m:
+        value = constants.get(m.group(1))
+        same = isinstance(value, dict) and value.get("type") == json.loads(f'"{m.group(3)}"')
+        return same if m.group(2) == "==" else not same
+    return None
+
+
+def branch(p: Parser, i: int, end: int) -> dict | None:
+    """The element a returned expression in src[i:end] evaluates to.
+
+    Handles `__dil.jsx(...)`, a parenthesised expression, `null`, and a ternary chain whose conditions
+    test a constant (`__dilConstants["1"]==null ? A : __dilConstants["1"].type==="math" ? B : C`, seen
+    2026-11-25 on an answer holding a writing block). The chosen branch follows the constants the share
+    publishes, which is the branch the page renders. None when a condition is not one `condition` knows.
+    """
+    i = p.ws(i)
+    while end > i and p.src[end - 1] in " \t\r\n;":
+        end -= 1
+    q = top_level(p, i, end, "?")
+    if q >= 0:
+        nested, j = 0, q + 1               # the `:` that closes this `?`, skipping nested ternaries
+        while True:
+            j = top_level(p, j, end, "?:")
+            if j < 0:
+                return None
+            if p.src[j] == "?":
+                nested += 1
+            elif nested:
+                nested -= 1
+            else:
+                break
+            j += 1
+        value = condition(p.src[i:q], p.constants)
+        if value is None:
+            return None
+        return branch(p, q + 1, j) if value else branch(p, j + 1, end)
+    if p.src.startswith(JSX, i):
+        node, _ = p.jsx(i + len(JSX))
+        return node
+    if p.src[i:i + 1] == "(" and p.matching(i) == end - 1:
+        return branch(p, i + 1, end - 1)
+    if p.src[i:end].strip() == "null":
+        return {"t": "el", "tag": "__dil.Fragment", "props": "", "children": []}
+    return None
+
+
 def parse(code: str, constants: dict) -> dict | None:
     """The element tree the program returns, or None when its body cannot be found."""
     k = code.find("return " + JSX)
-    if k < 0:
+    if k >= 0:
+        node, _ = Parser(code, constants).jsx(k + len("return " + JSX))
+        return node
+    # `return (<ternary>);}` inside the render component: the body ends where the arrow function does
+    m = re.search(r"DIL\.useAppData\(.*?\);return ", code, re.S)
+    if not m:
         return None
-    node, _ = Parser(code, constants).jsx(k + len("return " + JSX))
-    return node
+    p = Parser(code, constants)
+    return branch(p, m.end(), p.scan(m.end()))     # scan stops at the `}` closing the component
 
 
 # ------------------------------------------------------------------------------- props

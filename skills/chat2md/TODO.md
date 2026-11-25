@@ -14,6 +14,9 @@ Code work still owed; what is known or unknown about the sites is in `NOTES.md`.
   A second miss, 2026-09-26: a misplaced sources footnote replaced the space after a message's first word with the source list, and the run still reported "verified" (details in `NOTES.md`, ChatGPT citations).
   The raw pages of the five ChatGPT shares converted so far are worth keeping as a regression set when this is done; today they must be re-fetched from the links in their transcripts' headers.
   Since 2026-11-12 a re-fetch gives the new "octane" page, so the old-format path can no longer be regression-tested from links; keep `--save-raw` pages of new shares instead.
+- ChatGPT octane, found 2026-11-25 by re-fetching the 24 ChatGPT shares linked from local transcripts (every one now serves the octane page): the run notes gaps the octane path does not handle yet, unchanged by that day's fix.
+  Reference types `grouped_webpages` (on 12 shares), `url`, `file`, `writing`; message fields `maskedUploads` (2 shares) and `hideActions` (2); `Entity` dil components (3 shares, "NOT in the file").
+  For each, check whether the transcript actually lacks something the page shows (for `Entity`, whether the bare name is already in the markdown copy) and either handle it or record it in `NOTES.md` as nothing to render.
 - ChatGPT octane: the splicer in `chatgpt_dil.py` has been through three real shares only.
   It places a component by the program text before or after it; a constant that also appears earlier in the markdown, or one the markdown rewrites (smart quotes, entities, math), could misplace a component or show text as page-only, and the verbatim check would not notice either.
   A cross-check worth adding: count the components in `dil.code` and fail the run when fewer were placed.

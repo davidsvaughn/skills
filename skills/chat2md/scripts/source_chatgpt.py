@@ -510,6 +510,37 @@ OCTANE_KEYS = {"id", "role", "content", "reasoningSummary", "source", "approvedU
                "renderFormat"}
 
 
+# A client-defined widget inside an octane answer's `content`: U+E212, the widget as a JSON object,
+# U+E213 (seen 2026-11-25, share `6b06abbe-...`, a writing block). `dil.fallbackMarkdown` writes the
+# same widget as markdown; for a writing block that is the `:::writing{...}` directive.
+WIDGET = re.compile("(.*?)", re.S)
+
+
+def decode_widgets(text: str, counters: dict) -> str:
+    """`text` with each embedded widget object replaced by the markdown it stands for.
+
+    A writing block becomes `:::writing{variant=".." id=".."}`, its text, `:::` (the form ChatGPT's own
+    markdown copy and the pre-octane pages use); a widget of another kind with a non-empty
+    `fallbackMarkdown` becomes that; anything else is left as it is and counted.
+    """
+    def one(m: re.Match) -> str:
+        try:
+            obj = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            obj = None
+        block = (obj or {}).get("sharedWritingBlock") if isinstance(obj, dict) else None
+        if isinstance(block, dict) and isinstance(block.get("content"), str):
+            counters["octane_writing_blocks"] = counters.get("octane_writing_blocks", 0) + 1
+            return (f':::writing{{variant="{block.get("variant", "standard")}" id="{block.get("id", "")}"}}\n'
+                    f'{block["content"]}\n:::')
+        if isinstance(obj, dict) and isinstance(obj.get("fallbackMarkdown"), str) and obj["fallbackMarkdown"]:
+            counters["octane_widgets_fallback"] = counters.get("octane_widgets_fallback", 0) + 1
+            return obj["fallbackMarkdown"]
+        counters["octane_widgets_unknown"] = counters.get("octane_widgets_unknown", 0) + 1
+        return m.group(0)
+    return WIDGET.sub(one, text)
+
+
 def build_octane_blocks(conv: dict, counters: dict) -> list[dict]:
     """Blocks for an octane page: the messages are already flat and in display order.
 
@@ -531,6 +562,9 @@ def build_octane_blocks(conv: dict, counters: dict) -> list[dict]:
                 blocks.append({"kind": "act", "text": m["reasoningSummary"]})
             source = m.get("source") or {}
             dil = source.get("dil") or {}
+            text = decode_widgets(text, counters)
+            if dil.get("fallbackMarkdown") and text != dil["fallbackMarkdown"]:
+                counters["octane_content_differs"] = counters.get("octane_content_differs", 0) + 1
             tree = chatgpt_dil.parse(dil.get("code") or "", dil.get("constants") or {}) if dil else None
             if tree:
                 results = ((dil.get("appData") or {}).get("opGenui") or {}).get("componentResults") or {}
@@ -622,6 +656,17 @@ def load(source: str, is_url: bool, raw_out: str | None) -> tuple[dict, list[dic
     if counters.get("dil_unknown"):
         kinds = ", ".join(sorted(set(counters["dil_unknown"])))
         notes.append(f"{len(counters['dil_unknown'])} dil component(s) of unknown type NOT in the file ({kinds})")
+    if counters.get("octane_writing_blocks"):
+        notes.append(f"{counters['octane_writing_blocks']} writing block(s) decoded from the widget object in "
+                     "`content` into a :::writing directive")
+    if counters.get("octane_widgets_fallback"):
+        notes.append(f"{counters['octane_widgets_fallback']} embedded widget(s) written from their own fallbackMarkdown")
+    if counters.get("octane_widgets_unknown"):
+        notes.append(f"{counters['octane_widgets_unknown']} embedded widget object(s) of unknown shape left as raw "
+                     "JSON in the file - extend decode_widgets in source_chatgpt.py")
+    if counters.get("octane_content_differs"):
+        notes.append(f"{counters['octane_content_differs']} answer(s) whose content, after decoding, still differs "
+                     "from dil.fallbackMarkdown - compare them")
     for key, what in [("octane_unknown_fields", "message field"), ("octane_unknown_refs", "reference type"),
                       ("octane_unknown_roles", "message role")]:
         if counters.get(key):
