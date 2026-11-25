@@ -20,3 +20,7 @@ Code work still owed; what is known or unknown about the sites is in `NOTES.md`.
 - ChatGPT octane: the splicer in `chatgpt_dil.py` has been through three real shares only.
   It places a component by the program text before or after it; a constant that also appears earlier in the markdown, or one the markdown rewrites (smart quotes, entities, math), could misplace a component or show text as page-only, and the verbatim check would not notice either.
   A cross-check worth adding: count the components in `dil.code` and fail the run when fewer were placed.
+- ChatGPT octane, `chatgpt_dil.splice` (found 2026-11-25 on share `6b06e498-...`, details in `NOTES.md`): two placement flaws, neither losing text.
+  A redundant `.map` chart's unit label is written as an orphan page-only block; skip unmatched text inside a data subtree whether or not its data block was shown.
+  A pending component can be inserted inside a heading; when the next placed text starts a line after `#` markup, insert before the `#`s, or at the end of the previous paragraph.
+  Re-run `--save-raw` pages of recent shares before and after, and diff the transcripts.
