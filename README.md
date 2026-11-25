@@ -10,6 +10,7 @@ Reference notes that are not skills live on the [`notes`](https://github.com/dav
 | [draft](skills/draft) | `/draft [question]` | Saves Claude's previous response (or an answer) to `.notes/drafts/` so you can annotate it with CriticMarkup in your editor. | nothing |
 | [chat2md](skills/chat2md) | a pasted share link | Converts a shared ChatGPT or claude.ai conversation into a complete markdown transcript, and checks that every message made it into the file. | Python 3; `playwright-cli` for some claude.ai links |
 | [handoff](skills/handoff) | `/handoff` | Writes the next numbered `HANDOFF-NNN.md`, a complete current-state snapshot for the next agent or session; earlier handoffs are never overwritten. | nothing |
+| [bt-headset-mic](skills/bt-headset-mic) | ask to use (or stop using) a Bluetooth headset's mic | Switches a connected Bluetooth headset between playback-only A2DP and headset mode so its mic works, makes it the default input, and switches back on request. | Linux with PulseAudio or PipeWire, `pactl` |
 | [whoami](skills/whoami) | `/whoami` | Prints this session's messaging address for `SendMessage`, the sessions it can reach, and live sessions under other config dirs. | Claude Code only; bash, jq |
 
 `ann` and `draft` are two ways into the same review loop: after annotating, tell Claude "address the annotations in <path>", and it follows the protocol in each skill's `references/criticmarkup.md`.
